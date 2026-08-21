@@ -1,0 +1,1101 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flota Stellantis - Dashboard</title>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone@7.29.7/babel.min.js"></script>
+
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+
+    <style>
+        body { background-color: #f8fafc; font-family: system-ui, -apple-system, sans-serif; }
+        .loader { border: 3px solid #f3f3f3; border-top: 3px solid #e11d48; border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite; display: inline-block; vertical-align: middle; }
+        .loader-sm { border: 2px solid #f3f3f3; border-top: 2px solid #ffffff; border-radius: 50%; width: 14px; height: 14px; animation: spin 1s linear infinite; display: inline-block; vertical-align: middle; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .fade-in { animation: fadeIn 0.2s ease-in-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: scale(0.97); } to { opacity: 1; transform: scale(1); } }
+        .slide-down { animation: slideDown .18s ease-out; }
+        @keyframes slideDown { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #f1f5f9; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        .row-btn { transition: background-color .12s ease; }
+    </style>
+</head>
+<body>
+    <div id="root">
+        <div style="height: 100vh; display: flex; align-items: center; justify-content: center; color: #64748b;">
+            Cargando Flota...
+        </div>
+    </div>
+
+    <script type="text/babel">
+        const { useState, useMemo, useEffect, useRef } = React;
+        const { createRoot } = ReactDOM;
+
+        // --- ICONOS ---
+        const Icons = {
+            Truck: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="16" height="13" x="1" y="5" rx="2" /><polygon points="16 8 20 8 23 11 23 16 16 16 16 8" /><circle cx="5.5" cy="18.5" r="2.5" /><circle cx="18.5" cy="18.5" r="2.5" /></svg>,
+            Plus: () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>,
+            Trash2: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>,
+            Edit: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>,
+            Eye: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>,
+            X: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>,
+            Upload: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="M12 12v9"/><path d="m16 16-4-4-4 4"/></svg>,
+            BarChart2: () => <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" x2="18" y1="20" y2="10"/><line x1="12" x2="12" y1="20" y2="4"/><line x1="6" x2="6" y1="20" y2="14"/></svg>,
+            PieChart: () => <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg>,
+            Wrench: () => <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>,
+            AlertTriangle: () => <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>,
+            CheckCircle: () => <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>,
+            Calendar: () => <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></svg>,
+            ChevronDown: () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>,
+            Search: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>,
+            Lock: () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>,
+            LogOut: () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>,
+            FileText: () => <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg>,
+            IdCard: () => <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="14" x="2" y="5" rx="2"/><line x1="6" x2="6" y1="9" y2="9"/><line x1="6" x2="10" y1="13" y2="13"/><line x1="14" x2="18" y1="9" y2="9"/><line x1="14" x2="18" y1="13" y2="13"/></svg>,
+            Info: () => <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>,
+            Layers: () => <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.84l8.57 3.91a2 2 0 0 0 1.66 0l8.57-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/></svg>,
+            Table: () => <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3h18v18H3z"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M9 3v18"/></svg>,
+            Home: () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>,
+        };
+
+        // --- FIREBASE (misma base de datos que el dashboard operativo y la matriz) ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyB5OvYG9qGFrwQGCIIk2ps6R7tBDrhHqrY",
+            authDomain: "kpis-stellantis.firebaseapp.com",
+            projectId: "kpis-stellantis",
+            storageBucket: "kpis-stellantis.firebasestorage.app",
+            messagingSenderId: "618714680596",
+            appId: "1:618714680596:web:8b7d14cb1dd4e6a9dd0601",
+            measurementId: "G-WDXSRLJ6VB"
+        };
+
+        let db;
+        try {
+            if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+            db = firebase.firestore();
+        } catch (error) { console.error("Error Firebase:", error); }
+
+        const FLEET_COLLECTION = "fleet_vehicles";
+
+        // --- FIREBASE FleetCheck (proyecto de Inspección de Unidades — distinto al de Flota) ---
+        // Se conecta como una segunda app de Firebase (con nombre) para poder leer, en el mismo
+        // dashboard de Flota, la calificación y el detalle de inspección sin redirigir a otro archivo.
+        const fleetCheckConfig = {
+            apiKey: "AIzaSyD3uFqBpV991wnc5IDRRd9eblNOyABtF4o",
+            authDomain: "fleettrack-yfais.firebaseapp.com",
+            projectId: "fleettrack-yfais",
+            storageBucket: "fleettrack-yfais.firebasestorage.app",
+            messagingSenderId: "6118541836",
+            appId: "1:6118541836:web:b384d6a84dbc3ec53abc29"
+        };
+        let fcDb;
+        try {
+            let fcApp = firebase.apps.find(a => a.name === 'fleetcheck');
+            if (!fcApp) fcApp = firebase.initializeApp(fleetCheckConfig, 'fleetcheck');
+            fcDb = fcApp.firestore();
+        } catch (error) { console.error("Error Firebase FleetCheck:", error); }
+
+        // Misma ponderación por categoría que usa FleetCheck para calcular su calificación,
+        // replicada aquí para poder mostrar el mismo % de evaluación dentro de Flota.
+        const FC_CATEGORY_ORDER = ["Seguridad", "Mecánica", "Llantas", "Eléctrico", "Equipo de seguridad", "limpieza y documentación", "Confort y carrocería"];
+        const FC_CATEGORY_WEIGHTS = { "Seguridad": 35, "Mecánica": 20, "Llantas": 15, "Eléctrico": 10, "Equipo de seguridad": 10, "limpieza y documentación": 5, "Confort y carrocería": 5 };
+        const FC_TIERS = [
+            { min: 95, label: 'Excelente', color: '#22c55e' },
+            { min: 90, label: 'Aceptable', color: '#84cc16' },
+            { min: 80, label: 'Condicionada', color: '#f0a500' },
+            { min: 70, label: 'Deficiente', color: '#f97316' },
+            { min: 0, label: 'Crítico', color: '#f87171' },
+        ];
+        const fcClassify = (score) => FC_TIERS.find(t => score >= t.min) || FC_TIERS[FC_TIERS.length - 1];
+        const fcGetItem = (checklist, unidadId, apartadoId) => checklist[unidadId + '_' + apartadoId] || {};
+        const fcUnitStats = (apartados, checklist, unidadId) => {
+            let revisado = 0, cumple = 0; const total = apartados.length || 1;
+            apartados.forEach(a => {
+                const c = fcGetItem(checklist, unidadId, a.id);
+                if (c.cumple === true || c.cumple === false) revisado++;
+                if (c.cumple === true) cumple++;
+            });
+            return { revisado, cumple, total, pctRevisado: Math.round(revisado / total * 100) };
+        };
+        const fcComputeScore = (apartados, checklist, unidadId) => {
+            let score = 0;
+            FC_CATEGORY_ORDER.forEach(cat => {
+                const weight = FC_CATEGORY_WEIGHTS[cat] || 0;
+                const items = apartados.filter(a => a.categoria === cat);
+                if (!items.length) return;
+                const hasFail = items.some(a => fcGetItem(checklist, unidadId, a.id).cumple === false);
+                if (!hasFail) score += weight;
+            });
+            return score;
+        };
+
+        // --- COMPRESIÓN DE IMÁGENES A BASE64 (se guardan directo en Firestore, sin Storage) ---
+        // Reduce cada imagen a un JPEG pequeño y la devuelve como data URL, probando primero
+        // dimensiones/calidad altas y bajando ambas hasta que quepa cómodamente en un documento
+        // de Firestore (límite duro de 1 MiB por documento; aquí dejamos margen para 2 imágenes + campos).
+        const MAX_DOC_IMAGE_CHARS = 420000; // ~420 KB de texto base64 por imagen
+        const compressImageToDataURL = (file) => new Promise((resolve, reject) => {
+            const objectUrl = URL.createObjectURL(file);
+            const img = new Image();
+            img.onload = () => {
+                let best = null;
+                const dimSteps = [1280, 960, 720, 520];
+                outer:
+                for (const maxDim of dimSteps) {
+                    let { width, height } = img;
+                    if (width > maxDim || height > maxDim) {
+                        const scale = maxDim / Math.max(width, height);
+                        width = Math.max(1, Math.round(width * scale));
+                        height = Math.max(1, Math.round(height * scale));
+                    }
+                    const canvas = document.createElement('canvas');
+                    canvas.width = width; canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, width, height);
+                    ctx.drawImage(img, 0, 0, width, height);
+                    for (let q = 0.75; q >= 0.35; q -= 0.1) {
+                        const dataUrl = canvas.toDataURL('image/jpeg', q);
+                        best = dataUrl;
+                        if (dataUrl.length <= MAX_DOC_IMAGE_CHARS) break outer;
+                    }
+                }
+                URL.revokeObjectURL(objectUrl);
+                resolve(best);
+            };
+            img.onerror = (e) => { URL.revokeObjectURL(objectUrl); reject(e); };
+            img.src = objectUrl;
+        });
+
+        // --- DATOS DEL EXCEL (carga inicial / semilla) ---
+        const FLEET_SEED = [{"vehicleId": 4454, "year": 2016, "type": "Camion", "plate": "506RR6", "plant": "CAMIONES", "mecanix": 0.9336, "buenEstado": 394, "atenderPronto": 26, "requiereReparacion": 2, "ultimoPreventivo": "2026-12-04"}, {"vehicleId": 4630, "year": 2016, "type": "Camion", "plate": "95RB6B", "plant": "CAMIONES", "mecanix": 0.9655, "buenEstado": 616, "atenderPronto": 14, "requiereReparacion": 8, "ultimoPreventivo": "2026-12-04"}, {"vehicleId": 4640, "year": 2016, "type": "Camion", "plate": "11RB7B", "plant": "CAMIONES", "mecanix": 0.975, "buenEstado": 623, "atenderPronto": 14, "requiereReparacion": 2, "ultimoPreventivo": "2026-09-02"}, {"vehicleId": 4641, "year": 2016, "type": "Camion", "plate": "10RB7B", "plant": "MOTORES NORTE", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-12-10"}, {"vehicleId": 4647, "year": 2016, "type": "Camion", "plate": "06RB7B", "plant": "CAMIONES", "mecanix": 0.935, "buenEstado": 331, "atenderPronto": 23, "requiereReparacion": 0, "ultimoPreventivo": "2026-09-11"}, {"vehicleId": 4648, "year": 2016, "type": "Camion", "plate": "05RB7B", "plant": "CAMIONES", "mecanix": 0.9237, "buenEstado": 327, "atenderPronto": 27, "requiereReparacion": 0, "ultimoPreventivo": "2026-08-31"}, {"vehicleId": 4659, "year": 2016, "type": "Camion", "plate": "34RB9C", "plant": "CAMIONES", "mecanix": 0.9465, "buenEstado": 336, "atenderPronto": 19, "requiereReparacion": 0, "ultimoPreventivo": "2026-07-31"}, {"vehicleId": 4662, "year": 2016, "type": "Camion", "plate": "31RB9C", "plant": "CAMIONES", "mecanix": 0.9886, "buenEstado": 348, "atenderPronto": 0, "requiereReparacion": 4, "ultimoPreventivo": "2026-07-22"}, {"vehicleId": 4669, "year": 2016, "type": "Camion", "plate": "28RF7A", "plant": "VAN", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-11-22"}, {"vehicleId": 4671, "year": 2017, "type": "Camion", "plate": "92RB8C", "plant": "VAN", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-11-04"}, {"vehicleId": 4672, "year": 2017, "type": "Camion", "plate": "91RB8C", "plant": "CAMIONES", "mecanix": 0.9595, "buenEstado": 545, "atenderPronto": 18, "requiereReparacion": 5, "ultimoPreventivo": "2026-10-10"}, {"vehicleId": 4685, "year": 2016, "type": "Camion", "plate": "24RB9C", "plant": "CAMIONES", "mecanix": 0.9679, "buenEstado": 482, "atenderPronto": 8, "requiereReparacion": 8, "ultimoPreventivo": "2026-12-03"}, {"vehicleId": 4687, "year": 2017, "type": "Camion", "plate": "87RB8C", "plant": "VAN", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-10-03"}, {"vehicleId": 4692, "year": 2016, "type": "Camion", "plate": "45RB9C", "plant": "CAMIONES", "mecanix": 0.97, "buenEstado": 550, "atenderPronto": 14, "requiereReparacion": 3, "ultimoPreventivo": "2026-09-26"}, {"vehicleId": 4698, "year": 2017, "type": "Camion", "plate": "82RB8C", "plant": "MOTORES NORTE", "mecanix": 0.8958, "buenEstado": 447, "atenderPronto": 31, "requiereReparacion": 21, "ultimoPreventivo": "2027-03-20"}, {"vehicleId": 4701, "year": 2017, "type": "Camion", "plate": "06RB9C", "plant": "MOTORES NORTE", "mecanix": 0.8431, "buenEstado": 360, "atenderPronto": 45, "requiereReparacion": 22, "ultimoPreventivo": "2026-09-29"}, {"vehicleId": 4702, "year": 2017, "type": "Camion", "plate": "05RB9C", "plant": "CAMIONES", "mecanix": 0.9379, "buenEstado": 332, "atenderPronto": 22, "requiereReparacion": 0, "ultimoPreventivo": "2026-10-04"}, {"vehicleId": 4703, "year": 2016, "type": "Camion", "plate": "44RB9C", "plant": "VAN", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-09-26"}, {"vehicleId": 4704, "year": 2017, "type": "Camion", "plate": "04RB9C", "plant": "CAMIONES", "mecanix": 0.9836, "buenEstado": 419, "atenderPronto": 6, "requiereReparacion": 1, "ultimoPreventivo": "2026-12-02"}, {"vehicleId": 4718, "year": 2017, "type": "Camion", "plate": "98RB8C", "plant": "VAN", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-08-02"}, {"vehicleId": 4721, "year": 2017, "type": "Camion", "plate": "95RB8C", "plant": "CAMIONES", "mecanix": 0.9673, "buenEstado": 711, "atenderPronto": 20, "requiereReparacion": 4, "ultimoPreventivo": "2026-09-12"}, {"vehicleId": 4722, "year": 2017, "type": "Camion", "plate": "39RA2F", "plant": "CAMIONES", "mecanix": 0.9734, "buenEstado": 548, "atenderPronto": 8, "requiereReparacion": 7, "ultimoPreventivo": "2026-09-15"}, {"vehicleId": 4733, "year": 2017, "type": "Camion", "plate": "27RA2F", "plant": "MOTORES NORTE", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2027-07-27"}, {"vehicleId": 4737, "year": 2017, "type": "Camion", "plate": "20RB9C", "plant": "CAMIONES", "mecanix": 0.9352, "buenEstado": 332, "atenderPronto": 23, "requiereReparacion": 0, "ultimoPreventivo": "2026-08-27"}, {"vehicleId": 4748, "year": 2017, "type": "Camion", "plate": "15RB9C", "plant": "CAMIONES", "mecanix": 0.986, "buenEstado": 211, "atenderPronto": 3, "requiereReparacion": 0, "ultimoPreventivo": "2026-10-11"}, {"vehicleId": 4756, "year": 2017, "type": "Camion", "plate": "13RB9C", "plant": "MOTORES NORTE", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-12-11"}, {"vehicleId": 4759, "year": 2017, "type": "Camion", "plate": "10RB9C", "plant": "CAMIONES", "mecanix": 0.9883, "buenEstado": 421, "atenderPronto": 0, "requiereReparacion": 5, "ultimoPreventivo": "2026-11-25"}, {"vehicleId": 4760, "year": 2017, "type": "Camion", "plate": "09RB9C", "plant": "CAMIONES", "mecanix": 0.9237, "buenEstado": 327, "atenderPronto": 27, "requiereReparacion": 0, "ultimoPreventivo": "2026-09-30"}, {"vehicleId": 4762, "year": 2017, "type": "Camion", "plate": "56RB6B", "plant": "CAMIONES", "mecanix": 0.9741, "buenEstado": 677, "atenderPronto": 12, "requiereReparacion": 6, "ultimoPreventivo": "2026-08-03"}, {"vehicleId": 4770, "year": 2017, "type": "Camion", "plate": "49RB6B", "plant": "CAMIONES", "mecanix": 0.9818, "buenEstado": 485, "atenderPronto": 2, "requiereReparacion": 7, "ultimoPreventivo": "2026-08-07"}, {"vehicleId": 4801, "year": 2017, "type": "Camion", "plate": "45RB6B", "plant": "CAMIONES", "mecanix": 0.8979, "buenEstado": 378, "atenderPronto": 40, "requiereReparacion": 3, "ultimoPreventivo": "2026-07-28"}, {"vehicleId": 4803, "year": 2017, "type": "Camion", "plate": "69RB6B", "plant": "CAMIONES", "mecanix": 0.9788, "buenEstado": 416, "atenderPronto": 3, "requiereReparacion": 6, "ultimoPreventivo": "2026-12-04"}, {"vehicleId": 4805, "year": 2017, "type": "Camion", "plate": "67RB6B", "plant": "CAMIONES", "mecanix": 0.98, "buenEstado": 343, "atenderPronto": 2, "requiereReparacion": 5, "ultimoPreventivo": "2026-11-22"}, {"vehicleId": 4807, "year": 2017, "type": "Camion", "plate": "65RB6B", "plant": "CAMIONES", "mecanix": 0.9839, "buenEstado": 489, "atenderPronto": 7, "requiereReparacion": 1, "ultimoPreventivo": "2026-11-18"}, {"vehicleId": 4942, "year": 2017, "type": "Camion", "plate": "30RA9G", "plant": "CAMIONES", "mecanix": 0.9472, "buenEstado": 269, "atenderPronto": 15, "requiereReparacion": 0, "ultimoPreventivo": "2026-09-03"}, {"vehicleId": 4969, "year": 2017, "type": "Camion", "plate": "42RA9G", "plant": "EXTENSION", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-07-09"}, {"vehicleId": 5388, "year": 2018, "type": "Camion", "plate": "04RB7H", "plant": "CAMIONES", "mecanix": 0.9859, "buenEstado": 70, "atenderPronto": 1, "requiereReparacion": 0, "ultimoPreventivo": "2027-02-01"}, {"vehicleId": 5470, "year": 2018, "type": "Camion", "plate": "18RA6S", "plant": "VAN", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-08-04"}, {"vehicleId": 5614, "year": 2018, "type": "Camion", "plate": "", "plant": "MOTORES NORTE", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-12-06"}, {"vehicleId": 5691, "year": 2018, "type": "Camion", "plate": "66-RA-1Y", "plant": "CAMIONES", "mecanix": 0.9489, "buenEstado": 539, "atenderPronto": 17, "requiereReparacion": 12, "ultimoPreventivo": "2026-09-27"}, {"vehicleId": 5692, "year": 2018, "type": "Camion", "plate": "65-RA-1Y", "plant": "MOTORES NORTE", "mecanix": 0.9028, "buenEstado": 511, "atenderPronto": 26, "requiereReparacion": 29, "ultimoPreventivo": "2027-01-30"}, {"vehicleId": 5795, "year": 2018, "type": "Camion", "plate": "02RA8Y", "plant": "CAMIONES", "mecanix": 0.9145, "buenEstado": 321, "atenderPronto": 30, "requiereReparacion": 0, "ultimoPreventivo": "2026-09-20"}, {"vehicleId": 5890, "year": 2018, "type": "Camion", "plate": "23RB5A", "plant": "EXTENSION", "mecanix": 1, "buenEstado": 74, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-10-23"}, {"vehicleId": 5891, "year": 2018, "type": "Camion", "plate": "24RB5A", "plant": "MOTORES NORTE", "mecanix": 0.9286, "buenEstado": 195, "atenderPronto": 14, "requiereReparacion": 1, "ultimoPreventivo": "2026-08-28"}, {"vehicleId": 5893, "year": 2018, "type": "Camion", "plate": "26RB5A", "plant": "CAMIONES", "mecanix": 0.9272, "buenEstado": 331, "atenderPronto": 26, "requiereReparacion": 0, "ultimoPreventivo": "2027-08-13"}, {"vehicleId": 6115, "year": 2019, "type": "Camion", "plate": "31-RB-2B", "plant": "VAN", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-09-02"}, {"vehicleId": 6117, "year": 2019, "type": "Camion", "plate": "29-RB-2B", "plant": "CAMIONES", "mecanix": 0.9831, "buenEstado": 350, "atenderPronto": 1, "requiereReparacion": 5, "ultimoPreventivo": "2026-09-01"}, {"vehicleId": 6322, "year": 2019, "type": "Camion", "plate": "81-RB-4B", "plant": "CAMIONES", "mecanix": 0.9892, "buenEstado": 551, "atenderPronto": 0, "requiereReparacion": 6, "ultimoPreventivo": "2026-10-27"}, {"vehicleId": 6431, "year": 2019, "type": "Camion", "plate": "22RB1E", "plant": "CAMIONES", "mecanix": 0.9882, "buenEstado": 419, "atenderPronto": 1, "requiereReparacion": 4, "ultimoPreventivo": "2026-09-04"}, {"vehicleId": 6432, "year": 2019, "type": "Camion", "plate": "21RB1E", "plant": "VAN", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-07-11"}, {"vehicleId": 6433, "year": 2019, "type": "Camion", "plate": "20RB1E", "plant": "MOTORES NORTE", "mecanix": 1, "buenEstado": 70, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-10-13"}, {"vehicleId": 6434, "year": 2019, "type": "Camion", "plate": "13RB1E", "plant": "VAN", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-09-08"}, {"vehicleId": 6448, "year": 2019, "type": "Camion", "plate": "18RB1E", "plant": "CAMIONES", "mecanix": 0.9831, "buenEstado": 350, "atenderPronto": 1, "requiereReparacion": 5, "ultimoPreventivo": "2026-10-08"}, {"vehicleId": 6453, "year": 2019, "type": "Camion", "plate": "17RB1E", "plant": "CAMIONES", "mecanix": 0.9944, "buenEstado": 353, "atenderPronto": 0, "requiereReparacion": 2, "ultimoPreventivo": "2026-09-07"}, {"vehicleId": 6486, "year": 2019, "type": "Camion", "plate": "79RB4V", "plant": "CAMIONES", "mecanix": 0.9683, "buenEstado": 550, "atenderPronto": 13, "requiereReparacion": 5, "ultimoPreventivo": "2026-10-05"}, {"vehicleId": 6662, "year": 2019, "type": "Camion", "plate": "72RB6H", "plant": "MOTORES NORTE", "mecanix": 1, "buenEstado": 135, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-12-20"}, {"vehicleId": 6902, "year": 2019, "type": "Camion", "plate": "40RB8J", "plant": "CAMIONES", "mecanix": 0.9858, "buenEstado": 416, "atenderPronto": 0, "requiereReparacion": 6, "ultimoPreventivo": "2026-10-15"}, {"vehicleId": 7099, "year": 2019, "type": "Camion", "plate": "94RA3T", "plant": "MOTORES NORTE", "mecanix": 0.8028, "buenEstado": 114, "atenderPronto": 18, "requiereReparacion": 10, "ultimoPreventivo": "2026-09-15"}, {"vehicleId": 7409, "year": 2019, "type": "Camion", "plate": "22RB8P", "plant": "MOTORES NORTE", "mecanix": 0.9204, "buenEstado": 393, "atenderPronto": 21, "requiereReparacion": 13, "ultimoPreventivo": "2027-02-17"}, {"vehicleId": 7410, "year": 2019, "type": "Camion", "plate": "23RB8P", "plant": "MOTORES NORTE", "mecanix": 1, "buenEstado": 70, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-08-24"}, {"vehicleId": 7411, "year": 2019, "type": "Camion", "plate": "28RB8P", "plant": "CAMIONES", "mecanix": 0.9384, "buenEstado": 335, "atenderPronto": 22, "requiereReparacion": 0, "ultimoPreventivo": "2026-08-20"}, {"vehicleId": 7412, "year": 2019, "type": "Camion", "plate": "27RB8P", "plant": "CAMIONES", "mecanix": 0.9859, "buenEstado": 70, "atenderPronto": 1, "requiereReparacion": 0, "ultimoPreventivo": "2026-08-03"}, {"vehicleId": 7413, "year": 2019, "type": "Camion", "plate": "26RB8P", "plant": "MOTORES NORTE", "mecanix": 0.8853, "buenEstado": 440, "atenderPronto": 36, "requiereReparacion": 21, "ultimoPreventivo": "2026-12-16"}, {"vehicleId": 7586, "year": 2019, "type": "Camion", "plate": "10RB9M", "plant": "CAMIONES", "mecanix": 0.9857, "buenEstado": 69, "atenderPronto": 1, "requiereReparacion": 0, "ultimoPreventivo": "2026-09-03"}, {"vehicleId": 7800, "year": 2020, "type": "Camion", "plate": "31RB3V", "plant": "EXTENSION", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-10-04"}, {"vehicleId": 7822, "year": 2019, "type": "Camion", "plate": "15RB5V", "plant": "VAN", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-11-12"}, {"vehicleId": 7952, "year": 2020, "type": "Camion", "plate": "01RB8V", "plant": "CAMIONES", "mecanix": 0.9377, "buenEstado": 331, "atenderPronto": 22, "requiereReparacion": 0, "ultimoPreventivo": "2026-08-04"}, {"vehicleId": 9470, "year": 2021, "type": "Camion", "plate": "20RC7C", "plant": "VAN", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-09-06"}, {"vehicleId": 9610, "year": 2021, "type": "Camion", "plate": "19RC7C", "plant": "VAN", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-09-17"}, {"vehicleId": 9630, "year": 2021, "type": "Camion", "plate": "07RC9C", "plant": "CAMIONES", "mecanix": 0.9814, "buenEstado": 421, "atenderPronto": 2, "requiereReparacion": 6, "ultimoPreventivo": "2026-09-13"}, {"vehicleId": 9631, "year": 2021, "type": "Camion", "plate": "02RC9C", "plant": "CAMIONES", "mecanix": 0.998, "buenEstado": 499, "atenderPronto": 0, "requiereReparacion": 1, "ultimoPreventivo": "2026-08-31"}, {"vehicleId": 9632, "year": 2021, "type": "Camion", "plate": "04RC9C", "plant": "MOTORES NORTE", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-09-01"}, {"vehicleId": 9633, "year": 2021, "type": "Camion", "plate": "01RC9C", "plant": "CAMIONES", "mecanix": 0.9701, "buenEstado": 552, "atenderPronto": 10, "requiereReparacion": 7, "ultimoPreventivo": "2026-09-01"}, {"vehicleId": 10345, "year": 2020, "type": "Camion", "plate": "56RC4F", "plant": "EXTENSION", "mecanix": 1, "buenEstado": 74, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-09-16"}, {"vehicleId": 11011, "year": 2022, "type": "Camion", "plate": "83RC2R", "plant": "MOTORES NORTE", "mecanix": 0.9789, "buenEstado": 418, "atenderPronto": 6, "requiereReparacion": 3, "ultimoPreventivo": "2026-11-10"}, {"vehicleId": 11012, "year": 2022, "type": "Camion", "plate": "84RC2R", "plant": "EXTENSION", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-09-23"}, {"vehicleId": 11013, "year": 2022, "type": "Camion", "plate": "79RC2R", "plant": "EXTENSION", "mecanix": 1, "buenEstado": 148, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-09-15"}, {"vehicleId": 11014, "year": 2022, "type": "Camion", "plate": "80RC2R", "plant": "EXTENSION", "mecanix": 1, "buenEstado": 74, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-09-26"}, {"vehicleId": 11015, "year": 2022, "type": "Camion", "plate": "78RC2R", "plant": "MOTORES NORTE", "mecanix": 0.9695, "buenEstado": 413, "atenderPronto": 10, "requiereReparacion": 3, "ultimoPreventivo": "2026-09-08"}, {"vehicleId": 11016, "year": 2022, "type": "Camion", "plate": "82RC2R", "plant": "EXTENSION", "mecanix": 1, "buenEstado": 74, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-09-17"}, {"vehicleId": 11038, "year": 2021, "type": "Camion", "plate": "01RC1D", "plant": "VAN", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-09-24"}, {"vehicleId": 11167, "year": 2022, "type": "Camion", "plate": "08RC1U", "plant": "EXTENSION", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-12-02"}, {"vehicleId": 11176, "year": 2022, "type": "Camion", "plate": "02RC1U", "plant": "EXTENSION", "mecanix": 1, "buenEstado": 74, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-08-09"}, {"vehicleId": 11177, "year": 2022, "type": "Camion", "plate": "97RC2M", "plant": "VAN", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-10-14"}, {"vehicleId": 11178, "year": 2022, "type": "Camion", "plate": "03RC1U", "plant": "EXTENSION", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2027-01-03"}, {"vehicleId": 11179, "year": 2022, "type": "Camion", "plate": "13RC1U", "plant": "EXTENSION", "mecanix": 1, "buenEstado": 148, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-09-11"}, {"vehicleId": 11180, "year": 2022, "type": "Camion", "plate": "12RC1U", "plant": "EXTENSION", "mecanix": 1, "buenEstado": 74, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-10-20"}, {"vehicleId": 11192, "year": 2022, "type": "Camion", "plate": "54RC2M", "plant": "EXTENSION", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-07-22"}, {"vehicleId": 11200, "year": 2022, "type": "Camion", "plate": "45RC2M", "plant": "EXTENSION", "mecanix": 1, "buenEstado": 74, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-09-21"}, {"vehicleId": 11588, "year": 2022, "type": "Camioneta", "plate": "83RC2U", "plant": "EXTENSION", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-07-29"}, {"vehicleId": 11803, "year": 2022, "type": "Camioneta", "plate": "25RC4U", "plant": "MOTORES SUR", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-11-04"}, {"vehicleId": 11860, "year": 2022, "type": "Camioneta", "plate": "13RC4U", "plant": "EXTENSION", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-07-25"}, {"vehicleId": 12629, "year": 2023, "type": "Camion", "plate": "43RC1V", "plant": "EXTENSION", "mecanix": 1, "buenEstado": 148, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-11-19"}, {"vehicleId": 12633, "year": 2023, "type": "Camion", "plate": "39RC1V", "plant": "MOTORES SUR", "mecanix": 0.9932, "buenEstado": 290, "atenderPronto": 0, "requiereReparacion": 2, "ultimoPreventivo": "2026-08-16"}, {"vehicleId": 12723, "year": 2023, "type": "Camion", "plate": "72RD6M", "plant": "EXTENSION", "mecanix": 1, "buenEstado": 74, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-07-30"}, {"vehicleId": 12798, "year": 2023, "type": "Camion", "plate": "04RD7M", "plant": "CAMIONES", "mecanix": 1, "buenEstado": 71, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-12-25"}, {"vehicleId": 12799, "year": 2023, "type": "Camion", "plate": "03RD7M", "plant": "VAN", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-10-23"}, {"vehicleId": 12802, "year": 2023, "type": "Camion", "plate": "02RD7M", "plant": "CAMIONES", "mecanix": 0.9746, "buenEstado": 346, "atenderPronto": 4, "requiereReparacion": 5, "ultimoPreventivo": "2026-12-04"}, {"vehicleId": 12866, "year": 2023, "type": "Camion", "plate": "17RD7M", "plant": "MOTORES NORTE", "mecanix": 1, "buenEstado": 70, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-10-03"}, {"vehicleId": 12867, "year": 2023, "type": "Camion", "plate": "16RD7M", "plant": "EXTENSION", "mecanix": 1, "buenEstado": 367, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-08-14"}, {"vehicleId": 12949, "year": 2023, "type": "Camion", "plate": "92RD5M", "plant": "EXTENSION", "mecanix": 0.9718, "buenEstado": 69, "atenderPronto": 2, "requiereReparacion": 0, "ultimoPreventivo": "2026-07-29"}, {"vehicleId": 12950, "year": 2023, "type": "Camion", "plate": "91RD5M", "plant": "VAN", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-11-16"}, {"vehicleId": 12999, "year": 2023, "type": "Camion", "plate": "89RD5M", "plant": "CAMIONES", "mecanix": 0.9861, "buenEstado": 71, "atenderPronto": 1, "requiereReparacion": 0, "ultimoPreventivo": "2026-09-21"}, {"vehicleId": 13001, "year": 2023, "type": "Camion", "plate": "07RD5M", "plant": "MOTORES NORTE", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-10-26"}, {"vehicleId": 13003, "year": 2023, "type": "Camion", "plate": "05RD5M", "plant": "EXTENSION", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-09-29"}, {"vehicleId": 13024, "year": 2023, "type": "Camion", "plate": "19RD6M", "plant": "EXTENSION", "mecanix": 1, "buenEstado": 148, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-09-16"}, {"vehicleId": 13025, "year": 2023, "type": "Camion", "plate": "18RD6M", "plant": "VAN", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-09-09"}, {"vehicleId": 13354, "year": 2023, "type": "Camion", "plate": "89RD3S", "plant": "MOTORES NORTE", "mecanix": 1, "buenEstado": 70, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-10-31"}, {"vehicleId": 13356, "year": 2023, "type": "Camion", "plate": "88RD3S", "plant": "MOTORES NORTE", "mecanix": 0.9857, "buenEstado": 138, "atenderPronto": 2, "requiereReparacion": 0, "ultimoPreventivo": "2026-10-10"}, {"vehicleId": 13497, "year": 2023, "type": "Camion", "plate": "65RD1S", "plant": "MOTORES NORTE", "mecanix": 0.9714, "buenEstado": 68, "atenderPronto": 2, "requiereReparacion": 0, "ultimoPreventivo": "2026-08-15"}, {"vehicleId": 13565, "year": 2023, "type": "Camion", "plate": "78RD4V", "plant": "EXTENSION", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-08-31"}, {"vehicleId": 13566, "year": 2023, "type": "Camion", "plate": "77RD4V", "plant": "MOTORES NORTE", "mecanix": 1, "buenEstado": 70, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-11-17"}, {"vehicleId": 13567, "year": 2023, "type": "Camion", "plate": "76RD4V", "plant": "EXTENSION", "mecanix": 1, "buenEstado": 148, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-08-20"}, {"vehicleId": 13904, "year": 2024, "type": "Camion", "plate": "66RD6W", "plant": "VAN", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-09-13"}, {"vehicleId": 13906, "year": 2024, "type": "Camion", "plate": "64RD6W", "plant": "CAMIONES", "mecanix": 0.9425, "buenEstado": 459, "atenderPronto": 22, "requiereReparacion": 6, "ultimoPreventivo": "2027-02-10"}, {"vehicleId": 14197, "year": 2024, "type": "Camion", "plate": "69RD9W", "plant": "EXTENSION", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-09-13"}, {"vehicleId": 14214, "year": 2024, "type": "Camion", "plate": "81RD7Z", "plant": "CAMIONES", "mecanix": 0.9724, "buenEstado": 141, "atenderPronto": 4, "requiereReparacion": 0, "ultimoPreventivo": "2026-12-24"}, {"vehicleId": 14215, "year": 2024, "type": "Camion", "plate": "80RD7Z", "plant": "VAN", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-11-20"}, {"vehicleId": 14243, "year": 2024, "type": "Camion", "plate": "73RD7Z", "plant": "CAMIONES", "mecanix": 1, "buenEstado": 71, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-10-05"}, {"vehicleId": 14879, "year": 2024, "type": "Camion", "plate": "78RE7E", "plant": "EXTENSION", "mecanix": 1, "buenEstado": 148, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-08-23"}, {"vehicleId": 14880, "year": 2024, "type": "Camion", "plate": "50RE5F", "plant": "EXTENSION", "mecanix": 1, "buenEstado": 148, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-08-16"}, {"vehicleId": 15165, "year": 2024, "type": "Camion", "plate": "99RE8E", "plant": "EXTENSION", "mecanix": 1, "buenEstado": 71, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-10-13"}, {"vehicleId": 15166, "year": 2024, "type": "Camion", "plate": "98RE8E", "plant": "EXTENSION", "mecanix": 1, "buenEstado": 148, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-08-24"}, {"vehicleId": 15186, "year": 2024, "type": "Camion", "plate": "95RE8E", "plant": "CAMIONES", "mecanix": 1, "buenEstado": 71, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-10-13"}, {"vehicleId": 15187, "year": 2024, "type": "Camion", "plate": "85RE9E", "plant": "EXTENSION", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-07-28"}, {"vehicleId": 15189, "year": 2024, "type": "Camion", "plate": "83RE9E", "plant": "EXTENSION", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-10-09"}, {"vehicleId": 15210, "year": 2024, "type": "Camion", "plate": "28RE1F", "plant": "CAMIONES", "mecanix": 1, "buenEstado": 71, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-09-19"}, {"vehicleId": 15288, "year": 2025, "type": "Camion", "plate": "07RE5F", "plant": "MOTORES NORTE", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-10-23"}, {"vehicleId": 15449, "year": 2025, "type": "Camion", "plate": "96RE6F", "plant": "EXTENSION", "mecanix": 1, "buenEstado": 219, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-09-12"}, {"vehicleId": 15450, "year": 2025, "type": "Camion", "plate": "95RE6F", "plant": "CAMIONES", "mecanix": 1, "buenEstado": 71, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-09-22"}, {"vehicleId": 15560, "year": 2025, "type": "Camion", "plate": "90RE9X", "plant": "EXTENSION", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-07-29"}, {"vehicleId": 15767, "year": 2025, "type": "Camion", "plate": "62RE4L", "plant": "EXTENSION", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-08-13"}, {"vehicleId": 15895, "year": 2024, "type": "Camioneta", "plate": "57RE7L", "plant": "MOTORES SUR", "mecanix": 1, "buenEstado": 296, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-10-27"}, {"vehicleId": 15934, "year": 2024, "type": "Camioneta", "plate": "47RE7L", "plant": "MOTORES SUR", "mecanix": 1, "buenEstado": 218, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-09-28"}, {"vehicleId": 15980, "year": 2025, "type": "Camion", "plate": "69RE9L", "plant": "MOTORES SUR", "mecanix": 1, "buenEstado": 148, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-08-09"}, {"vehicleId": 15981, "year": 2025, "type": "Camion", "plate": "68RE9L", "plant": "MOTORES SUR", "mecanix": 0.9932, "buenEstado": 290, "atenderPronto": 0, "requiereReparacion": 2, "ultimoPreventivo": "2026-09-06"}, {"vehicleId": 15982, "year": 2025, "type": "Camion", "plate": "67RE9L", "plant": "VAN", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-08-04"}, {"vehicleId": 15983, "year": 2025, "type": "Camion", "plate": "65RE9L", "plant": "VAN", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-08-25"}, {"vehicleId": 15984, "year": 2025, "type": "Camion", "plate": "64RE9L", "plant": "MOTORES SUR", "mecanix": 1, "buenEstado": 296, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-10-16"}, {"vehicleId": 15985, "year": 2025, "type": "Camion", "plate": "63RE9L", "plant": "VAN", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-11-01"}, {"vehicleId": 15986, "year": 2025, "type": "Camion", "plate": "62RE9L", "plant": "VAN", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-07-13"}, {"vehicleId": 15987, "year": 2025, "type": "Camion", "plate": "61RE9L", "plant": "MOTORES SUR", "mecanix": 1, "buenEstado": 296, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-10-02"}, {"vehicleId": 15988, "year": 2025, "type": "Camion", "plate": "60RE9L", "plant": "MOTORES SUR", "mecanix": 1, "buenEstado": 148, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-08-09"}, {"vehicleId": 15989, "year": 2025, "type": "Camion", "plate": "66RE9L", "plant": "VAN", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-08-11"}, {"vehicleId": 16070, "year": 2025, "type": "Camion", "plate": "32RE2M", "plant": "EXTENSION", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-08-03"}, {"vehicleId": 16071, "year": 2025, "type": "Camion", "plate": "31RE2M", "plant": "EXTENSION", "mecanix": 1, "buenEstado": 73, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-07-29"}, {"vehicleId": 16072, "year": 2025, "type": "Camion", "plate": "30RE2M", "plant": "EXTENSION", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-11-02"}, {"vehicleId": 16073, "year": 2025, "type": "Camion", "plate": "29RE2M", "plant": "EXTENSION", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-10-11"}, {"vehicleId": 16074, "year": 2025, "type": "Camion", "plate": "28RE2M", "plant": "EXTENSION", "mecanix": 1, "buenEstado": 74, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-10-08"}, {"vehicleId": 16087, "year": 2025, "type": "Camion", "plate": "49RE3M", "plant": "VAN", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-08-12"}, {"vehicleId": 16088, "year": 2025, "type": "Camion", "plate": "48RE3M", "plant": "VAN", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2027-01-05"}, {"vehicleId": 16089, "year": 2025, "type": "Camion", "plate": "47RE3M", "plant": "VAN", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-11-18"}, {"vehicleId": 16090, "year": 2025, "type": "Camion", "plate": "46RE3M", "plant": "VAN", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-09-02"}, {"vehicleId": 16091, "year": 2025, "type": "Camion", "plate": "45RE3M", "plant": "VAN", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-08-26"}, {"vehicleId": 16100, "year": 2025, "type": "Camion", "plate": "10RE8N", "plant": "MOTORES NORTE", "mecanix": 0.9598, "buenEstado": 477, "atenderPronto": 20, "requiereReparacion": 0, "ultimoPreventivo": "2026-08-06"}, {"vehicleId": 16111, "year": 2025, "type": "Camion", "plate": "30RE8N", "plant": "MOTORES NORTE", "mecanix": 0.9331, "buenEstado": 265, "atenderPronto": 19, "requiereReparacion": 0, "ultimoPreventivo": "2026-08-24"}, {"vehicleId": 16118, "year": 2025, "type": "Camion", "plate": "38RE8N", "plant": "MOTORES NORTE", "mecanix": 0.9594, "buenEstado": 544, "atenderPronto": 21, "requiereReparacion": 2, "ultimoPreventivo": "2026-09-05"}, {"vehicleId": 16120, "year": 2025, "type": "Camion", "plate": "36RE8N", "plant": "MOTORES NORTE", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-08-01"}, {"vehicleId": 16122, "year": 2025, "type": "Camion", "plate": "34RE8N", "plant": "MOTORES NORTE", "mecanix": 0.9437, "buenEstado": 268, "atenderPronto": 16, "requiereReparacion": 0, "ultimoPreventivo": "2026-11-13"}, {"vehicleId": 16124, "year": 2025, "type": "Camion", "plate": "01RE8N", "plant": "MOTORES NORTE", "mecanix": 0.9537, "buenEstado": 474, "atenderPronto": 23, "requiereReparacion": 0, "ultimoPreventivo": "2026-08-17"}, {"vehicleId": 16127, "year": 2025, "type": "Camion", "plate": "97RE7N", "plant": "MOTORES NORTE", "mecanix": 0.9416, "buenEstado": 468, "atenderPronto": 29, "requiereReparacion": 0, "ultimoPreventivo": "2026-11-12"}, {"vehicleId": 16129, "year": 2025, "type": "Camion", "plate": "95RE7N", "plant": "MOTORES NORTE", "mecanix": 0.9401, "buenEstado": 267, "atenderPronto": 16, "requiereReparacion": 1, "ultimoPreventivo": "2026-08-21"}, {"vehicleId": 16431, "year": 2024, "type": "Camioneta", "plate": "09RE9N", "plant": "MOTORES SUR", "mecanix": 1, "buenEstado": 296, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-09-28"}, {"vehicleId": 16432, "year": 2024, "type": "Camioneta", "plate": "10RE9N", "plant": "MOTORES SUR", "mecanix": 0.9892, "buenEstado": 275, "atenderPronto": 3, "requiereReparacion": 0, "ultimoPreventivo": "2026-11-04"}, {"vehicleId": 16501, "year": 2025, "type": "Camion", "plate": "16RE8P", "plant": "EXTENSION", "mecanix": 1, "buenEstado": 74, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-09-08"}, {"vehicleId": 16502, "year": 2025, "type": "Camion", "plate": "15RE8P", "plant": "EXTENSION", "mecanix": 1, "buenEstado": 71, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-08-16"}, {"vehicleId": 16503, "year": 2025, "type": "Camion", "plate": "10RE8P", "plant": "MOTORES SUR", "mecanix": 1, "buenEstado": 148, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-09-12"}, {"vehicleId": 16504, "year": 2025, "type": "Camion", "plate": "14RE8P", "plant": "MOTORES SUR", "mecanix": 1, "buenEstado": 148, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-10-13"}, {"vehicleId": 16505, "year": 2025, "type": "Camion", "plate": "13RE8P", "plant": "MOTORES SUR", "mecanix": 1, "buenEstado": 148, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-07-23"}, {"vehicleId": 16506, "year": 2025, "type": "Camion", "plate": "12RE8P", "plant": "MOTORES SUR", "mecanix": 1, "buenEstado": 296, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-12-12"}, {"vehicleId": 16507, "year": 2025, "type": "Camion", "plate": "11RE8P", "plant": "EXTENSION", "mecanix": 1, "buenEstado": 74, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-07-23"}, {"vehicleId": 16515, "year": 2025, "type": "Camion", "plate": "25RE8P", "plant": "VAN", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-09-06"}, {"vehicleId": 16516, "year": 2025, "type": "Camion", "plate": "23RE8P", "plant": "VAN", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-10-11"}, {"vehicleId": 16517, "year": 2025, "type": "Camion", "plate": "22RE8P", "plant": "EXTENSION", "mecanix": 1, "buenEstado": 222, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-08-04"}, {"vehicleId": 16518, "year": 2025, "type": "Camion", "plate": "21RE8P", "plant": "MOTORES SUR", "mecanix": 1, "buenEstado": 148, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-09-24"}, {"vehicleId": 16519, "year": 2025, "type": "Camion", "plate": "19RE8P", "plant": "MOTORES SUR", "mecanix": 1, "buenEstado": 222, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-10-28"}, {"vehicleId": 16520, "year": 2025, "type": "Camion", "plate": "18RE8P", "plant": "EXTENSION", "mecanix": 1, "buenEstado": 74, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-10-20"}, {"vehicleId": 16521, "year": 2025, "type": "Camion", "plate": "17RE8P", "plant": "EXTENSION", "mecanix": 1, "buenEstado": 148, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-08-08"}, {"vehicleId": 16567, "year": 2025, "type": "Camion", "plate": "20RE8P", "plant": "VAN", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-11-16"}, {"vehicleId": 16816, "year": 2026, "type": "Camion", "plate": "90RE1W", "plant": "VAN", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-08-17"}, {"vehicleId": 16822, "year": 2026, "type": "Camion", "plate": "95RE1W", "plant": "VAN", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-08-13"}, {"vehicleId": 16823, "year": 2026, "type": "Camion", "plate": "06RE2W", "plant": "CAMIONES", "mecanix": 0.9954, "buenEstado": 436, "atenderPronto": 0, "requiereReparacion": 2, "ultimoPreventivo": "2026-11-22"}, {"vehicleId": 16824, "year": 2026, "type": "Camion", "plate": "05RE2W", "plant": "MOTORES NORTE", "mecanix": 0.9965, "buenEstado": 282, "atenderPronto": 1, "requiereReparacion": 0, "ultimoPreventivo": "2026-09-06"}, {"vehicleId": 16825, "year": 2026, "type": "Camion", "plate": "02RE2W", "plant": "CAMIONES", "mecanix": 0.9944, "buenEstado": 356, "atenderPronto": 2, "requiereReparacion": 0, "ultimoPreventivo": null}, {"vehicleId": 16826, "year": 2026, "type": "Camion", "plate": "01RE2W", "plant": "MOTORES NORTE", "mecanix": 0.9952, "buenEstado": 209, "atenderPronto": 1, "requiereReparacion": 0, "ultimoPreventivo": "2026-08-09"}, {"vehicleId": 16827, "year": 2026, "type": "Camion", "plate": "99RE1W", "plant": "VAN", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-08-24"}, {"vehicleId": 16842, "year": 2026, "type": "Camion", "plate": "03RE2W", "plant": "VAN", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-10-20"}, {"vehicleId": 16843, "year": 2026, "type": "Camion", "plate": "11RE2W", "plant": "VAN", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-08-20"}, {"vehicleId": 16879, "year": 2026, "type": "Camion", "plate": "14RE2W", "plant": "EXTENSION", "mecanix": 1, "buenEstado": 74, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-08-31"}, {"vehicleId": 16882, "year": 2026, "type": "Camion", "plate": "13RE2W", "plant": "CAMIONES", "mecanix": 1, "buenEstado": 361, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-09-03"}, {"vehicleId": 16889, "year": 2026, "type": "Camion", "plate": "12RE2W", "plant": "EXTENSION", "mecanix": 1, "buenEstado": 148, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-10-15"}, {"vehicleId": 16890, "year": 2026, "type": "Camion", "plate": "08RE2W", "plant": "EXTENSION", "mecanix": 1, "buenEstado": 148, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-08-13"}, {"vehicleId": 16891, "year": 2026, "type": "Camion", "plate": "07RE2W", "plant": "CAMIONES", "mecanix": 1, "buenEstado": 498, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2027-01-26"}, {"vehicleId": 16892, "year": 2026, "type": "Camion", "plate": "98RE1W", "plant": "MOTORES SUR", "mecanix": 1, "buenEstado": 296, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-08-03"}, {"vehicleId": 16893, "year": 2026, "type": "Camion", "plate": "97RE1W", "plant": "CAMIONES", "mecanix": 1, "buenEstado": 639, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-12-05"}, {"vehicleId": 16894, "year": 2026, "type": "Camion", "plate": "63RE1W", "plant": "EXTENSION", "mecanix": 1, "buenEstado": 219, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-08-08"}, {"vehicleId": 16895, "year": 2026, "type": "Camion", "plate": "92RE1W", "plant": "CAMIONES", "mecanix": 0.9972, "buenEstado": 360, "atenderPronto": 1, "requiereReparacion": 0, "ultimoPreventivo": "2027-01-27"}, {"vehicleId": 16896, "year": 2026, "type": "Camion", "plate": "91RE1W", "plant": "VAN", "mecanix": null, "buenEstado": 0, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-08-25"}, {"vehicleId": 16897, "year": 2026, "type": "Camion", "plate": "88RE1W", "plant": "CAMIONES", "mecanix": 0.9954, "buenEstado": 432, "atenderPronto": 0, "requiereReparacion": 2, "ultimoPreventivo": "2026-09-24"}, {"vehicleId": 16898, "year": 2026, "type": "Camion", "plate": "87RE1W", "plant": "MOTORES NORTE", "mecanix": 0.9683, "buenEstado": 275, "atenderPronto": 9, "requiereReparacion": 0, "ultimoPreventivo": "2026-07-23"}, {"vehicleId": 16899, "year": 2026, "type": "Camion", "plate": "86RE1W", "plant": "EXTENSION", "mecanix": 1, "buenEstado": 222, "atenderPronto": 0, "requiereReparacion": 0, "ultimoPreventivo": "2026-11-08"}, {"vehicleId": 16937, "year": 2026, "type": "Camion", "plate": "94RE1W", "plant": "MOTORES NORTE", "mecanix": 0.9296, "buenEstado": 264, "atenderPronto": 19, "requiereReparacion": 1, "ultimoPreventivo": "2026-08-23"}, {"vehicleId": 16938, "year": 2026, "type": "Camion", "plate": "93RE1W", "plant": "MOTORES NORTE", "mecanix": 0.9836, "buenEstado": 419, "atenderPronto": 7, "requiereReparacion": 0, "ultimoPreventivo": "2026-08-17"}];
+
+
+        // --- CATÁLOGO DE PLANTAS (mismos códigos y colores que la Matriz de Cumplimiento) ---
+        const AREA_META = {
+            'MOTORES NORTE': { code: 'SNEP', label: 'Norte', color: '#0ea5e9' },
+            'VAN': { code: 'SVAP', label: 'Van', color: '#8b5cf6' },
+            'EXTENSION': { code: 'LD', label: 'Extensión', color: '#14b8a6' },
+            'CAMIONES': { code: 'HD', label: 'Camiones', color: '#f43f5e' },
+            'MOTORES SUR': { code: 'SSEP', label: 'Sur', color: '#f59e0b' },
+        };
+        const PLANT_ORDER = ['MOTORES NORTE', 'VAN', 'EXTENSION', 'CAMIONES', 'MOTORES SUR'];
+        const VEHICLE_TYPES = ['Camion', 'Camioneta'];
+        const ADMIN_PASSWORD = 'LIPU77';
+        const NO_CUMPLE_YEAR_MAX = 2021; // Modelo 2021 o anterior = no cumple
+
+        const scoreBucket = (m) => {
+            if (m === null || m === undefined) return { key: 'sin', label: 'Sin evaluar', color: '#94a3b8' };
+            if (m >= 0.95) return { key: 'exc', label: 'Excelente', color: '#10b981' };
+            if (m >= 0.90) return { key: 'bueno', label: 'Bueno', color: '#0ea5e9' };
+            if (m >= 0.80) return { key: 'reg', label: 'Regular', color: '#f59e0b' };
+            return { key: 'atn', label: 'Atención', color: '#e11d48' };
+        };
+        const fmtPct = m => m === null || m === undefined ? '—' : (m * 100).toFixed(1) + '%';
+        const fmtDate = d => { if (!d) return '—'; const [y, m, day] = d.split('-'); return `${day}/${m}/${y}`; };
+
+        // --- MINI GRÁFICOS ---
+        const BarChartOrdinal = ({ data, color = '#e11d48', height = 150 }) => {
+            const max = Math.max(...data.map(d => d.val), 1);
+            const [hover, setHover] = useState(null);
+            return (
+                <div className="w-full flex items-end justify-between gap-1" style={{ height: `${height}px` }}>
+                    {data.map((d, i) => (
+                        <div key={i} className="flex-1 flex flex-col items-center h-full justify-end group" onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}>
+                            <span className={`text-[10px] font-bold text-slate-600 mb-1 transition-opacity ${hover === i || d.val === max ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>{d.val}</span>
+                            <div className="w-full max-w-[26px] rounded-t-[4px]" style={{ height: `${Math.max(4, (d.val / max) * 100)}%`, backgroundColor: color, opacity: hover === null || hover === i ? 1 : 0.45 }}></div>
+                            <span className="mt-1.5 text-[9px] text-slate-400 font-medium">{d.label}</span>
+                        </div>
+                    ))}
+                </div>
+            );
+        };
+
+        const DonutChart = ({ data, title, centerLabel }) => {
+            const total = data.reduce((s, d) => s + d.val, 0);
+            if (total === 0) return <div className="h-40 flex items-center justify-center text-slate-300 text-xs">Sin datos</div>;
+            let acc = 0; const r = 40; const c = 50;
+            const segs = data.map(d => {
+                const p = d.val / total; if (p === 0) return null;
+                if (p >= 0.9995) return { d: `M 50 50 m -40, 0 a 40,40 0 1,0 80,0 a 40,40 0 1,0 -80,0`, color: d.color, label: d.label, val: d.val, percent: 100 };
+                const a1 = acc * 360; const a2 = (acc + p) * 360; acc += p;
+                const x1 = c + r * Math.cos(Math.PI * a1 / 180); const y1 = c + r * Math.sin(Math.PI * a1 / 180);
+                const x2 = c + r * Math.cos(Math.PI * a2 / 180); const y2 = c + r * Math.sin(Math.PI * a2 / 180);
+                return { d: `M ${c} ${c} L ${x1} ${y1} A ${r} ${r} 0 ${p > 0.5 ? 1 : 0} 1 ${x2} ${y2} Z`, color: d.color, label: d.label, val: d.val, percent: (p * 100).toFixed(0) };
+            }).filter(Boolean);
+            return (
+                <div className="flex flex-col items-center w-full">
+                    {title && <h5 className="text-xs font-bold text-slate-600 mb-1 uppercase tracking-wider">{title}</h5>}
+                    <div className="relative w-32 h-32 shrink-0">
+                        <svg viewBox="0 0 100 100" className="transform -rotate-90 w-full h-full">{segs.map((s, i) => <path key={i} d={s.d} fill={s.color} stroke="white" strokeWidth="1.5" />)}<circle cx="50" cy="50" r="26" fill="white" /></svg>
+                        <div className="absolute inset-0 flex items-center justify-center flex-col"><span className="text-lg font-bold text-slate-700">{centerLabel !== undefined ? centerLabel : total}</span></div>
+                    </div>
+                    <div className="w-full mt-3 space-y-1">
+                        {segs.map((s, i) => (
+                            <div key={i} className="flex justify-between text-xs items-center">
+                                <div className="flex items-center gap-1.5 min-w-0"><span className="w-2.5 h-2.5 rounded-full inline-block shrink-0" style={{ backgroundColor: s.color }}></span><span className="text-slate-600 truncate">{s.label}</span></div>
+                                <span className="font-bold text-slate-800 ml-2 shrink-0">{s.val} <span className="text-slate-400 font-normal">({s.percent}%)</span></span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+        };
+
+        const PlantScoreBars = ({ data }) => {
+            const [hover, setHover] = useState(null);
+            return (
+                <div className="w-full flex items-end justify-around gap-3" style={{ height: '170px' }}>
+                    {data.map((d, i) => (
+                        <div key={d.key} className="flex-1 flex flex-col items-center h-full justify-end" onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}>
+                            <span className="text-xs font-extrabold text-slate-700 mb-1">{d.score !== null ? (d.score * 100).toFixed(1) + '%' : '—'}</span>
+                            <div className="w-full max-w-[40px] rounded-t-[4px]" style={{ height: `${d.score !== null ? Math.max(6, ((d.score - 0.7) / 0.3) * 100) : 4}%`, backgroundColor: d.color, opacity: hover === null || hover === i ? 1 : 0.5 }}></div>
+                            <span className="mt-2 text-[10px] font-bold text-slate-600 text-center">{d.code}</span>
+                            <span className="text-[9px] text-slate-400">{d.n} un.</span>
+                        </div>
+                    ))}
+                </div>
+            );
+        };
+
+        // --- TARJETA KPI ---
+        const StatCard = ({ title, value, suffix = '', icon: Icon, color }) => (
+            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-3">
+                <div className="p-2.5 rounded-lg shrink-0" style={{ backgroundColor: color + '1a', color }}><Icon /></div>
+                <div className="min-w-0"><p className="text-[11px] text-slate-500 font-medium leading-tight truncate">{title}</p><p className="text-xl font-bold text-slate-800 leading-tight">{value}<span className="text-sm text-slate-400 ml-0.5">{suffix}</span></p></div>
+            </div>
+        );
+
+        // --- WIDGET DE DOCUMENTO (Póliza / Tarjeta de Circulación) ---
+        const DocSlot = ({ label, icon: Icon, url, isAdmin, onUpload, onDelete, onView, busy }) => {
+            const inputRef = useRef(null);
+            return (
+                <div className="border border-slate-200 rounded-lg p-3 bg-slate-50">
+                    <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-bold text-slate-600 flex items-center gap-1.5"><span className="text-slate-400"><Icon /></span>{label}</span>
+                        {url ? <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full font-bold">Cargado</span> : <span className="text-[10px] bg-slate-200 text-slate-500 px-1.5 py-0.5 rounded-full font-bold">Sin documento</span>}
+                    </div>
+                    {url && (
+                        <div className="w-full h-24 rounded-md overflow-hidden bg-white border border-slate-200 mb-2 cursor-pointer" onClick={onView}>
+                            <img src={url} alt={label} className="w-full h-full object-cover" />
+                        </div>
+                    )}
+                    <div className="flex gap-1.5 flex-wrap">
+                        {url && <button type="button" onClick={onView} className="flex-1 text-[11px] bg-white border border-slate-300 hover:bg-slate-100 rounded px-2 py-1.5 flex items-center justify-center gap-1 text-slate-600"><Icons.Eye />Ver</button>}
+                        {isAdmin && (
+                            <>
+                                <button type="button" disabled={busy} onClick={() => inputRef.current && inputRef.current.click()} className="flex-1 text-[11px] bg-slate-800 hover:bg-slate-900 text-white rounded px-2 py-1.5 flex items-center justify-center gap-1 disabled:opacity-50">
+                                    {busy ? <span className="loader-sm"></span> : <Icons.Upload />}{url ? 'Reemplazar' : 'Subir'}
+                                </button>
+                                {url && <button type="button" onClick={onDelete} className="text-[11px] bg-white border border-red-200 hover:bg-red-50 text-red-500 rounded px-2 py-1.5 flex items-center justify-center"><Icons.Trash2 /></button>}
+                                <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={e => { if (e.target.files[0]) onUpload(e.target.files[0]); e.target.value = ''; }} />
+                            </>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        // --- MODAL VISOR DE IMAGEN ---
+        const ImageViewer = ({ url, onClose }) => {
+            if (!url) return null;
+            return (
+                <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[60] p-6" onClick={onClose}>
+                    <img src={url} className="max-w-full max-h-full rounded-lg shadow-2xl" onClick={e => e.stopPropagation()} />
+                    <button onClick={onClose} className="absolute top-5 right-5 text-white bg-white/10 hover:bg-white/20 rounded-full p-2"><Icons.X /></button>
+                </div>
+            );
+        };
+
+        // --- MODAL DE UNIDAD (ver / editar / crear) ---
+        const VehicleModal = ({ vehicle, isAdmin, isNew, fcApartados, fcChecklist, fcUnidad, fcDb, failures, onClose, onSave, onDelete, showNotification }) => {
+            const [form, setForm] = useState({
+                vehicleId: vehicle ? vehicle.vehicleId : '',
+                year: vehicle ? vehicle.year : new Date().getFullYear(),
+                type: vehicle ? vehicle.type : 'Camion',
+                plate: vehicle ? vehicle.plate : '',
+                plant: vehicle ? vehicle.plant : PLANT_ORDER[0],
+                mecanix: vehicle && vehicle.mecanix !== null && vehicle.mecanix !== undefined ? (vehicle.mecanix * 100).toFixed(1) : '',
+                buenEstado: vehicle ? vehicle.buenEstado || 0 : 0,
+                atenderPronto: vehicle ? vehicle.atenderPronto || 0 : 0,
+                requiereReparacion: vehicle ? vehicle.requiereReparacion || 0 : 0,
+                ultimoPreventivo: vehicle && vehicle.ultimoPreventivo ? vehicle.ultimoPreventivo : '',
+            });
+            const [editMode, setEditMode] = useState(isNew);
+            const [saving, setSaving] = useState(false);
+            const [busyDoc, setBusyDoc] = useState(null);
+            const [viewerUrl, setViewerUrl] = useState(null);
+            const [docs, setDocs] = useState({
+                polizaUrl: vehicle ? vehicle.polizaUrl || null : null,
+                tarjetaUrl: vehicle ? vehicle.tarjetaUrl || null : null,
+            });
+
+            // --- Registro de Fallas Mecánicas (capturadas en Reporte diario, ligadas por ID de unidad) ---
+            const [failOpen, setFailOpen] = useState(false);
+            const unitFailures = failures || [];
+
+            // --- Inspección FleetCheck (solo lectura, misma unidad por número) ---
+            const [fcOpen, setFcOpen] = useState(false);
+            const [fcPhotos, setFcPhotos] = useState(null);
+            const [fcPhotosLoading, setFcPhotosLoading] = useState(false);
+            const fcStats = fcUnidad ? fcUnitStats(fcApartados, fcChecklist, fcUnidad.id) : null;
+            const fcScore = fcUnidad ? fcComputeScore(fcApartados, fcChecklist, fcUnidad.id) : null;
+            const fcTier = fcScore !== null ? fcClassify(fcScore) : null;
+            const fcBadgeColor = fcUnidad && fcStats && fcStats.revisado > 0 ? fcTier.color : '#94a3b8';
+            const fcBadgeText = !fcUnidad ? 'Sin FleetCheck' : (fcStats.revisado > 0 ? fcScore + '%' : 'Sin revisar');
+
+            useEffect(() => {
+                if (fcOpen && fcUnidad && fcPhotos === null && !fcPhotosLoading && fcDb) {
+                    setFcPhotosLoading(true);
+                    fcDb.collection('ste_unidad_fotos').doc(fcUnidad.id).get()
+                        .then(snap => setFcPhotos(snap.exists ? snap.data() : {}))
+                        .catch(e => { console.error(e); setFcPhotos({}); })
+                        .finally(() => setFcPhotosLoading(false));
+                }
+            }, [fcOpen, fcUnidad]);
+
+            const fcGroupedApartados = useMemo(() => {
+                const groups = []; const idx = {};
+                fcApartados.forEach(a => {
+                    if (!(a.categoria in idx)) { idx[a.categoria] = groups.length; groups.push({ categoria: a.categoria, items: [] }); }
+                    groups[idx[a.categoria]].items.push(a);
+                });
+                return groups;
+            }, [fcApartados]);
+
+            const change = e => setForm(p => ({ ...p, [e.target.name]: e.target.value }));
+
+            // Las imágenes se guardan como base64 directo en el documento de Firestore
+            // (no se usa Firebase Storage), comprimidas en el navegador antes de subirlas.
+            const uploadDoc = async (file, kind) => {
+                const vid = form.vehicleId || vehicle?.vehicleId;
+                if (!vid) { showNotification('error', 'Asigna primero un ID de unidad'); return; }
+                if (!db) { showNotification('error', 'Base de datos no disponible'); return; }
+                setBusyDoc(kind);
+                try {
+                    const dataUrl = await compressImageToDataURL(file);
+                    if (!dataUrl || dataUrl.length > MAX_DOC_IMAGE_CHARS) {
+                        showNotification('error', 'La imagen sigue siendo muy pesada; prueba con una foto más simple o de menor resolución');
+                        setBusyDoc(null); return;
+                    }
+                    const patch = kind === 'poliza' ? { polizaUrl: dataUrl } : { tarjetaUrl: dataUrl };
+                    await db.collection(FLEET_COLLECTION).doc(String(vid)).set({ ...patch, [kind + 'UpdatedAt']: new Date().toISOString() }, { merge: true });
+                    setDocs(d => ({ ...d, ...patch }));
+                    showNotification('success', 'Documento cargado');
+                } catch (e) { console.error(e); showNotification('error', 'Error al procesar/guardar el documento'); }
+                setBusyDoc(null);
+            };
+
+            const deleteDoc = async (kind) => {
+                if (!confirm('¿Eliminar este documento?')) return;
+                const patch = kind === 'poliza' ? { polizaUrl: null } : { tarjetaUrl: null };
+                try {
+                    const vid = form.vehicleId || vehicle?.vehicleId;
+                    if (db && vid) await db.collection(FLEET_COLLECTION).doc(String(vid)).set(patch, { merge: true });
+                    setDocs(d => ({ ...d, ...patch }));
+                    showNotification('success', 'Documento eliminado');
+                } catch (e) { console.error(e); showNotification('error', 'Error al eliminar'); }
+            };
+
+            const submit = async e => {
+                e.preventDefault();
+                if (!form.vehicleId || !form.plate || !form.plant) { showNotification('error', 'Completa ID, placas y planta'); return; }
+                setSaving(true);
+                const payload = {
+                    vehicleId: parseInt(form.vehicleId), year: parseInt(form.year) || null, type: form.type,
+                    plate: form.plate.toUpperCase(), plant: form.plant,
+                    mecanix: form.mecanix === '' ? null : Math.max(0, Math.min(100, parseFloat(form.mecanix))) / 100,
+                    buenEstado: parseInt(form.buenEstado) || 0, atenderPronto: parseInt(form.atenderPronto) || 0, requiereReparacion: parseInt(form.requiereReparacion) || 0,
+                    ultimoPreventivo: form.ultimoPreventivo || null,
+                };
+                await onSave(payload, isNew);
+                setSaving(false);
+            };
+
+            const bucket = scoreBucket(form.mecanix === '' ? null : parseFloat(form.mecanix) / 100);
+
+            return (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl flex flex-col max-h-[92vh] fade-in">
+                        <div className="bg-slate-900 p-4 flex justify-between items-center text-white rounded-t-2xl">
+                            <div>
+                                <h2 className="font-bold flex gap-2 items-center"><Icons.Truck /> {isNew ? 'Nueva Unidad' : `Unidad ${form.vehicleId}`}</h2>
+                                {!isNew && <p className="text-xs text-slate-400 mt-0.5">{form.plate} · {AREA_META[form.plant] ? AREA_META[form.plant].code + ' · ' + AREA_META[form.plant].label : form.plant}</p>}
+                            </div>
+                            <div className="flex items-center gap-2">
+                                {isAdmin && !isNew && !editMode && <button onClick={() => setEditMode(true)} className="bg-slate-700 hover:bg-slate-600 px-3 py-1.5 rounded text-xs flex items-center gap-1.5"><Icons.Edit />Editar</button>}
+                                <button onClick={onClose}><Icons.X /></button>
+                            </div>
+                        </div>
+
+                        <div className="p-6 overflow-y-auto space-y-5">
+                            {!editMode ? (
+                                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-3"><p className="text-[10px] text-slate-500 uppercase font-bold">Modelo</p><p className="font-bold text-slate-700">{form.year}</p></div>
+                                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-3"><p className="text-[10px] text-slate-500 uppercase font-bold">Tipo</p><p className="font-bold text-slate-700">{form.type}</p></div>
+                                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-3"><p className="text-[10px] text-slate-500 uppercase font-bold">Placas</p><p className="font-bold text-slate-700">{form.plate}</p></div>
+                                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-3"><p className="text-[10px] text-slate-500 uppercase font-bold">Planta</p><p className="font-bold text-slate-700">{AREA_META[form.plant] ? AREA_META[form.plant].code : form.plant}</p></div>
+                                    <div className="rounded-lg p-3 border" style={{ backgroundColor: bucket.color + '14', borderColor: bucket.color + '44' }}>
+                                        <p className="text-[10px] uppercase font-bold" style={{ color: bucket.color }}>Calificación Mecanix</p>
+                                        <p className="font-bold" style={{ color: bucket.color }}>{form.mecanix === '' ? 'Sin evaluar' : form.mecanix + '%'} <span className="text-[10px] font-normal">({bucket.label})</span></p>
+                                    </div>
+                                    <div className="rounded-lg p-3 border" style={{ backgroundColor: fcBadgeColor + '14', borderColor: fcBadgeColor + '44' }}>
+                                        <p className="text-[10px] uppercase font-bold" style={{ color: fcBadgeColor }}>% Evaluación (FleetCheck)</p>
+                                        <p className="font-bold" style={{ color: fcBadgeColor }}>{fcBadgeText} {fcUnidad && fcStats.revisado > 0 && <span className="text-[10px] font-normal">({fcTier.label})</span>}</p>
+                                    </div>
+                                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-3"><p className="text-[10px] text-slate-500 uppercase font-bold">Último Preventivo</p><p className="font-bold text-slate-700">{fmtDate(form.ultimoPreventivo)}</p></div>
+                                    <div className="bg-emerald-50 border border-emerald-100 rounded-lg p-3"><p className="text-[10px] text-emerald-600 uppercase font-bold">Buen Estado</p><p className="font-bold text-emerald-700">{form.buenEstado}</p></div>
+                                    <div className="bg-amber-50 border border-amber-100 rounded-lg p-3"><p className="text-[10px] text-amber-600 uppercase font-bold">Atender Pronto</p><p className="font-bold text-amber-700">{form.atenderPronto}</p></div>
+                                    <div className="bg-rose-50 border border-rose-100 rounded-lg p-3"><p className="text-[10px] text-rose-600 uppercase font-bold">Requiere Reparación</p><p className="font-bold text-rose-700">{form.requiereReparacion}</p></div>
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-2 md:grid-cols-3 gap-3 bg-slate-50 p-3 rounded-lg border">
+                                    <div><label className="text-xs font-bold text-slate-500">ID Unidad</label><input type="number" name="vehicleId" required disabled={!isNew} value={form.vehicleId} onChange={change} className="w-full border rounded p-1.5 text-sm disabled:bg-slate-100" /></div>
+                                    <div><label className="text-xs font-bold text-slate-500">Modelo (Año)</label><input type="number" name="year" value={form.year} onChange={change} className="w-full border rounded p-1.5 text-sm" /></div>
+                                    <div><label className="text-xs font-bold text-slate-500">Tipo</label><select name="type" value={form.type} onChange={change} className="w-full border rounded p-1.5 text-sm">{VEHICLE_TYPES.map(t => <option key={t}>{t}</option>)}</select></div>
+                                    <div><label className="text-xs font-bold text-slate-500">Placas</label><input type="text" name="plate" required value={form.plate} onChange={change} className="w-full border rounded p-1.5 text-sm uppercase" /></div>
+                                    <div><label className="text-xs font-bold text-slate-500">Planta</label><select name="plant" value={form.plant} onChange={change} className="w-full border rounded p-1.5 text-sm">{PLANT_ORDER.map(p => <option key={p} value={p}>{AREA_META[p].code} · {AREA_META[p].label}</option>)}</select></div>
+                                    <div><label className="text-xs font-bold text-slate-500">Mecanix % (vacío = sin evaluar)</label><input type="number" step="0.1" min="0" max="100" name="mecanix" value={form.mecanix} onChange={change} className="w-full border rounded p-1.5 text-sm" /></div>
+                                    <div><label className="text-xs font-bold text-emerald-600">Buen Estado</label><input type="number" name="buenEstado" value={form.buenEstado} onChange={change} className="w-full border rounded p-1.5 text-sm" /></div>
+                                    <div><label className="text-xs font-bold text-amber-600">Atender Pronto</label><input type="number" name="atenderPronto" value={form.atenderPronto} onChange={change} className="w-full border rounded p-1.5 text-sm" /></div>
+                                    <div><label className="text-xs font-bold text-rose-600">Requiere Reparación</label><input type="number" name="requiereReparacion" value={form.requiereReparacion} onChange={change} className="w-full border rounded p-1.5 text-sm" /></div>
+                                    <div><label className="text-xs font-bold text-slate-500">Último Preventivo</label><input type="date" name="ultimoPreventivo" value={form.ultimoPreventivo || ''} onChange={change} className="w-full border rounded p-1.5 text-sm" /></div>
+                                </div>
+                            )}
+
+                            {!isNew && (
+                                <div>
+                                    <h4 className="text-sm font-bold text-slate-600 mb-2">Documentos</h4>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                        <DocSlot label="Póliza" icon={Icons.FileText} url={docs.polizaUrl} isAdmin={isAdmin} busy={busyDoc === 'poliza'}
+                                            onUpload={f => uploadDoc(f, 'poliza')} onDelete={() => deleteDoc('poliza')} onView={() => setViewerUrl(docs.polizaUrl)} />
+                                        <DocSlot label="Tarjeta de Circulación" icon={Icons.IdCard} url={docs.tarjetaUrl} isAdmin={isAdmin} busy={busyDoc === 'tarjeta'}
+                                            onUpload={f => uploadDoc(f, 'tarjeta')} onDelete={() => deleteDoc('tarjeta')} onView={() => setViewerUrl(docs.tarjetaUrl)} />
+                                    </div>
+                                </div>
+                            )}
+                            {isNew && <p className="text-xs text-slate-400 flex items-center gap-1.5"><Icons.Info />Guarda la unidad primero; después podrás cargar Póliza y Tarjeta de Circulación.</p>}
+
+                            {!isNew && (
+                                <div>
+                                    <button type="button" onClick={() => setFcOpen(o => !o)} className="w-full flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100 text-left">
+                                        <span className="text-sm font-bold text-slate-600 flex items-center gap-2">
+                                            <span className="text-slate-400"><Icons.CheckCircle /></span>
+                                            Inspección FleetCheck
+                                            {fcUnidad && fcStats && <span className="text-xs font-normal text-slate-400">({fcStats.revisado}/{fcStats.total} puntos)</span>}
+                                        </span>
+                                        <span className={`text-slate-400 transition-transform ${fcOpen ? 'rotate-180' : ''}`}><Icons.ChevronDown /></span>
+                                    </button>
+                                    {fcOpen && (
+                                        <div className="mt-3 border border-slate-200 rounded-lg p-4 slide-down space-y-4">
+                                            {!fcUnidad ? (
+                                                <p className="text-sm text-slate-400 text-center py-6">Esta unidad aún no tiene inspección registrada en FleetCheck.</p>
+                                            ) : (
+                                                <>
+                                                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pb-3 border-b border-slate-200">
+                                                        <div className="bg-slate-50 rounded-lg p-2.5"><p className="text-[10px] text-slate-500 uppercase font-bold">Avance</p><p className="font-bold text-slate-700 text-sm">{fcStats.revisado}/{fcStats.total} ({fcStats.pctRevisado}%)</p></div>
+                                                        <div className="rounded-lg p-2.5" style={{ backgroundColor: (fcStats.revisado ? fcTier.color : '#94a3b8') + '14' }}>
+                                                            <p className="text-[10px] uppercase font-bold" style={{ color: fcStats.revisado ? fcTier.color : '#94a3b8' }}>Calificación</p>
+                                                            <p className="font-bold text-sm" style={{ color: fcStats.revisado ? fcTier.color : '#94a3b8' }}>{fcStats.revisado ? fcScore + ' · ' + fcTier.label : 'Sin revisar'}</p>
+                                                        </div>
+                                                        {fcUnidad.fechaAtencion && <div className="bg-slate-50 rounded-lg p-2.5"><p className="text-[10px] text-slate-500 uppercase font-bold">Fecha atención</p><p className="font-bold text-slate-700 text-sm">{fmtDate(fcUnidad.fechaAtencion)}</p></div>}
+                                                    </div>
+
+                                                    <div>
+                                                        <p className="text-xs font-bold text-slate-500 uppercase mb-2">Evidencia fotográfica</p>
+                                                        {fcPhotosLoading ? (
+                                                            <div className="text-xs text-slate-400 flex items-center gap-2"><span className="loader-sm"></span>Cargando fotos…</div>
+                                                        ) : (
+                                                            <div className="flex flex-wrap gap-2">
+                                                                {Array.from({ length: 10 }, (_, i) => i + 1).map(i => {
+                                                                    const url = fcPhotos && fcPhotos['foto' + i];
+                                                                    return url
+                                                                        ? <div key={i} className="w-16 h-16 rounded-lg overflow-hidden border-2 border-emerald-400 cursor-pointer bg-cover bg-center" style={{ backgroundImage: `url(${url})` }} onClick={() => setViewerUrl(url)} title={`Foto ${i}`}></div>
+                                                                        : <div key={i} className="w-16 h-16 rounded-lg border border-dashed border-slate-300 flex items-center justify-center text-[10px] text-slate-300">Foto {i}</div>;
+                                                                })}
+                                                            </div>
+                                                        )}
+                                                    </div>
+
+                                                    <div className="space-y-3">
+                                                        {fcGroupedApartados.map(g => (
+                                                            <div key={g.categoria}>
+                                                                <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wide border-b border-slate-200 pb-1 mb-1.5">{g.categoria}{FC_CATEGORY_WEIGHTS[g.categoria] !== undefined ? ` (${FC_CATEGORY_WEIGHTS[g.categoria]}%)` : ''}</p>
+                                                                <div className="divide-y divide-slate-100">
+                                                                    {g.items.map(a => {
+                                                                        const c = fcGetItem(fcChecklist, fcUnidad.id, a.id).cumple;
+                                                                        return (
+                                                                            <div key={a.id} className="flex items-center justify-between py-1 text-xs">
+                                                                                <span className="text-slate-600">{a.nombre}</span>
+                                                                                <span className={`font-bold ${c === true ? 'text-emerald-500' : c === false ? 'text-red-500' : 'text-slate-300'}`}>{c === true ? '✓ Cumple' : c === false ? '✗ No cumple' : '— Sin revisar'}</span>
+                                                                            </div>
+                                                                        );
+                                                                    })}
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+
+                        {!isNew && (
+                            <div>
+                                <button type="button" onClick={() => setFailOpen(o => !o)} className="w-full flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100 text-left">
+                                    <span className="text-sm font-bold text-slate-600 flex items-center gap-2">
+                                        <span className="text-slate-400"><Icons.Wrench /></span>
+                                        Registro de Fallas
+                                        <span className="text-xs font-normal text-slate-400">({unitFailures.length})</span>
+                                    </span>
+                                    <span className={`text-slate-400 transition-transform ${failOpen ? 'rotate-180' : ''}`}><Icons.ChevronDown /></span>
+                                </button>
+                                {failOpen && (
+                                    <div className="mt-3 border border-slate-200 rounded-lg p-4 slide-down">
+                                        {unitFailures.length === 0 ? (
+                                            <p className="text-sm text-slate-400 text-center py-6">Esta unidad no tiene fallas mecánicas registradas.</p>
+                                        ) : (
+                                            <div className="space-y-2">
+                                                {unitFailures.map((f, i) => (
+                                                    <div key={i} className="border border-indigo-100 bg-indigo-50/30 rounded-lg p-2.5 text-xs">
+                                                        <div className="flex justify-between text-indigo-600 font-bold mb-1">
+                                                            <span>{f.date} · {f.shift}</span>
+                                                            <span>{f.route || 'Sin ruta'}</span>
+                                                        </div>
+                                                        <p className="text-slate-700">{f.description || 'Sin descripción'}</p>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {(editMode || isNew) && (
+                            <div className="p-4 border-t bg-slate-50 flex justify-between items-center rounded-b-2xl">
+                                {!isNew ? <button type="button" onClick={() => onDelete(vehicle)} className="text-xs text-red-500 hover:text-red-700 flex items-center gap-1.5"><Icons.Trash2 />Eliminar unidad</button> : <div></div>}
+                                <div className="flex gap-2">
+                                    <button type="button" onClick={() => isNew ? onClose() : setEditMode(false)} className="px-4 py-2 rounded text-sm hover:bg-slate-200">Cancelar</button>
+                                    <button type="button" disabled={saving} onClick={submit} className="px-4 py-2 rounded text-sm bg-rose-600 text-white hover:bg-rose-700 shadow disabled:opacity-60 flex items-center gap-2">{saving && <span className="loader-sm"></span>}{isNew ? 'Guardar' : 'Actualizar'}</button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                    <ImageViewer url={viewerUrl} onClose={() => setViewerUrl(null)} />
+                </div>
+            );
+        };
+
+        // --- COLUMNAS ORDENABLES (listado de unidades) ---
+        const VEHICLE_COLUMNS = (showPlant) => {
+            const cols = [
+                { key: 'vehicleId', label: 'ID', get: v => v.vehicleId },
+                { key: 'plate', label: 'Placas', get: v => v.plate || '' },
+                { key: 'year', label: 'Modelo', get: v => v.year || 0 },
+                { key: 'type', label: 'Tipo', get: v => v.type || '' },
+            ];
+            if (showPlant) cols.push({ key: 'plant', label: 'Planta', get: v => AREA_META[v.plant] ? AREA_META[v.plant].label : (v.plant || '') });
+            cols.push({ key: 'mecanix', label: 'Mecanix', get: v => v.mecanix === null || v.mecanix === undefined ? -1 : v.mecanix, center: true });
+            cols.push({ key: 'fcScore', label: '% Eval.', get: (v, fcMap) => { const info = fcMap[v.vehicleId]; return info && info.revisado ? info.score : -1; }, center: true });
+            cols.push({ key: 'ultimoPreventivo', label: 'Últ. Preventivo', get: v => v.ultimoPreventivo || '' });
+            return cols;
+        };
+        const sortVehicles = (list, sort, columns, fcInfoMap) => {
+            const col = columns.find(c => c.key === sort.key) || columns[0];
+            const sorted = [...list].sort((a, b) => {
+                const va = col.get(a, fcInfoMap), vb = col.get(b, fcInfoMap);
+                if (typeof va === 'string' || typeof vb === 'string') return String(va).localeCompare(String(vb), 'es', { numeric: true, sensitivity: 'base' });
+                return va - vb;
+            });
+            if (sort.dir === 'desc') sorted.reverse();
+            return sorted;
+        };
+
+        // --- TABLA DE UNIDADES (compartida entre el bloque "Unidades Stellantis" y cada planta) ---
+        const VehicleListTable = ({ vehicles, showPlant, fcInfoMap, onOpenVehicle }) => {
+            const columns = useMemo(() => VEHICLE_COLUMNS(showPlant), [showPlant]);
+            const [sort, setSort] = useState({ key: 'vehicleId', dir: 'asc' });
+            const sorted = useMemo(() => sortVehicles(vehicles, sort, columns, fcInfoMap), [vehicles, sort, columns, fcInfoMap]);
+            const toggleSort = key => setSort(s => s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' });
+            const arrow = key => sort.key === key ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+            return (
+                <table className="w-full text-sm text-left">
+                    <thead className="sticky top-0 bg-slate-50 text-slate-500 text-xs z-10">
+                        <tr>
+                            {columns.map(c => (
+                                <th key={c.key} className={`p-3 cursor-pointer select-none hover:text-slate-700 hover:bg-slate-100 whitespace-nowrap ${c.center ? 'text-center' : ''}`} onClick={() => toggleSort(c.key)} title="Ordenar">
+                                    {c.label}{arrow(c.key)}
+                                </th>
+                            ))}
+                            <th className="p-3 text-center">Docs</th><th className="p-3"></th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                        {sorted.length === 0 && <tr><td colSpan={columns.length + 2} className="p-6 text-center text-slate-400">Sin unidades que coincidan.</td></tr>}
+                        {sorted.map(v => {
+                            const b = scoreBucket(v.mecanix);
+                            const info = fcInfoMap[v.vehicleId];
+                            return (
+                                <tr key={v.vehicleId} className="hover:bg-slate-50 row-btn cursor-pointer" onClick={() => onOpenVehicle(v)}>
+                                    <td className="p-3 font-bold text-slate-700">{v.vehicleId}</td>
+                                    <td className="p-3 text-slate-600">{v.plate || '—'}</td>
+                                    <td className="p-3 text-slate-600">{v.year}</td>
+                                    <td className="p-3 text-slate-500 text-xs">{v.type}</td>
+                                    {showPlant && <td className="p-3 text-slate-500 text-xs">{AREA_META[v.plant] ? AREA_META[v.plant].code : v.plant}</td>}
+                                    <td className="p-3 text-center"><span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: b.color + '1a', color: b.color }}>{fmtPct(v.mecanix)}</span></td>
+                                    <td className="p-3 text-center">
+                                        {info
+                                            ? (info.revisado
+                                                ? <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: info.tier.color + '1a', color: info.tier.color }} title={info.tier.label}>{info.score}%</span>
+                                                : <span className="text-xs text-slate-400">Sin revisar</span>)
+                                            : <span className="text-xs text-slate-300">—</span>}
+                                    </td>
+                                    <td className="p-3 text-slate-500 text-xs">{fmtDate(v.ultimoPreventivo)}</td>
+                                    <td className="p-3 text-center"><span className="flex items-center justify-center gap-1">
+                                        <span title="Póliza" className={v.polizaUrl ? 'text-emerald-500' : 'text-slate-300'}><Icons.FileText /></span>
+                                        <span title="Tarjeta de Circulación" className={v.tarjetaUrl ? 'text-emerald-500' : 'text-slate-300'}><Icons.IdCard /></span>
+                                    </span></td>
+                                    <td className="p-3 text-right text-slate-300"><Icons.Eye /></td>
+                                </tr>
+                            );
+                        })}
+                    </tbody>
+                </table>
+            );
+        };
+
+        // --- PANEL DE PLANTA (acordeón) ---
+        const PlantPanel = ({ plantKey, vehicles, search, defaultOpen, isAdmin, onOpenVehicle, fcInfoMap }) => {
+            const [open, setOpen] = useState(defaultOpen);
+            const meta = AREA_META[plantKey] || { code: plantKey, label: plantKey, color: '#64748b' };
+            const filtered = useMemo(() => vehicles.filter(v => {
+                if (!search) return true;
+                const s = search.toLowerCase();
+                return String(v.vehicleId).includes(s) || (v.plate || '').toLowerCase().includes(s);
+            }), [vehicles, search]);
+            const evaluated = vehicles.filter(v => v.mecanix !== null && v.mecanix !== undefined);
+            const avgScore = evaluated.length > 0 ? evaluated.reduce((s, v) => s + v.mecanix, 0) / evaluated.length : null;
+
+            useEffect(() => { if (search) setOpen(true); }, [search]);
+
+            return (
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                    <button onClick={() => setOpen(o => !o)} className="w-full flex items-center justify-between p-4 hover:bg-slate-50 text-left">
+                        <div className="flex items-center gap-3">
+                            <span className="w-3 h-3 rounded-full inline-block" style={{ backgroundColor: meta.color }}></span>
+                            <div><p className="font-bold text-slate-800">{meta.code} · {meta.label}</p><p className="text-xs text-slate-400">{vehicles.length} unidades</p></div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                            <span className="text-xs font-bold px-2.5 py-1 rounded-full" style={{ backgroundColor: (avgScore !== null ? scoreBucket(avgScore).color : '#94a3b8') + '1a', color: avgScore !== null ? scoreBucket(avgScore).color : '#94a3b8' }}>{avgScore !== null ? (avgScore * 100).toFixed(1) + '% prom.' : 'Sin evaluación'}</span>
+                            <span className={`text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`}><Icons.ChevronDown /></span>
+                        </div>
+                    </button>
+                    {open && (
+                        <div className="border-t border-slate-100 slide-down">
+                            <div className="max-h-96 overflow-y-auto">
+                                <VehicleListTable vehicles={filtered} showPlant={false} fcInfoMap={fcInfoMap} onOpenVehicle={onOpenVehicle} />
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // --- BLOQUE "UNIDADES STELLANTIS" (un solo acordeón con todas las unidades + columna de Planta) ---
+        const AllUnitsPanel = ({ vehicles, search, onOpenVehicle, fcInfoMap }) => {
+            const [open, setOpen] = useState(false);
+            const filtered = useMemo(() => vehicles.filter(v => {
+                if (!search) return true;
+                const s = search.toLowerCase();
+                return String(v.vehicleId).includes(s) || (v.plate || '').toLowerCase().includes(s);
+            }), [vehicles, search]);
+            useEffect(() => { if (search) setOpen(true); }, [search]);
+            const evaluated = vehicles.filter(v => v.mecanix !== null && v.mecanix !== undefined);
+            const avgScore = evaluated.length > 0 ? evaluated.reduce((s, v) => s + v.mecanix, 0) / evaluated.length : null;
+            return (
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                    <button onClick={() => setOpen(o => !o)} className="w-full flex items-center justify-between p-4 hover:bg-slate-50 text-left">
+                        <div className="flex items-center gap-3">
+                            <span className="w-3 h-3 rounded-full inline-block bg-slate-700"></span>
+                            <div><p className="font-bold text-slate-800">Unidades Stellantis</p><p className="text-xs text-slate-400">{vehicles.length} unidades</p></div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                            <span className="text-xs font-bold px-2.5 py-1 rounded-full" style={{ backgroundColor: (avgScore !== null ? scoreBucket(avgScore).color : '#94a3b8') + '1a', color: avgScore !== null ? scoreBucket(avgScore).color : '#94a3b8' }}>{avgScore !== null ? (avgScore * 100).toFixed(1) + '% prom.' : 'Sin evaluación'}</span>
+                            <span className={`text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`}><Icons.ChevronDown /></span>
+                        </div>
+                    </button>
+                    {open && (
+                        <div className="border-t border-slate-100 slide-down">
+                            <div className="max-h-96 overflow-y-auto">
+                                <VehicleListTable vehicles={filtered} showPlant={true} fcInfoMap={fcInfoMap} onOpenVehicle={onOpenVehicle} />
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // --- APP PRINCIPAL ---
+        const FleetDashboard = () => {
+            const [vehicles, setVehicles] = useState([]);
+            const [isLoading, setIsLoading] = useState(true);
+            const [loadError, setLoadError] = useState(false);
+            const [search, setSearch] = useState('');
+            const [plantFilter, setPlantFilter] = useState('Todas');
+            const [modalVehicle, setModalVehicle] = useState(null);
+            const [showNewModal, setShowNewModal] = useState(false);
+            const [isAdmin, setIsAdmin] = useState(false);
+            const [showLogin, setShowLogin] = useState(false);
+            const [passwordInput, setPasswordInput] = useState('');
+            const [loginError, setLoginError] = useState(false);
+            const [notification, setNotification] = useState(null);
+            const [seeding, setSeeding] = useState(false);
+
+            // --- FleetCheck (proyecto de inspección, solo lectura desde Flota) ---
+            const [fcUnidades, setFcUnidades] = useState([]);
+            const [fcApartados, setFcApartados] = useState([]);
+            const [fcChecklist, setFcChecklist] = useState({});
+
+            // --- Registro de Fallas Mecánicas (mismo proyecto que Flota, capturado en Matriz/Stellantis) ---
+            const [incidents, setIncidents] = useState([]);
+
+            const showNotification = (type, message) => { setNotification({ type, message }); setTimeout(() => setNotification(null), 3000); };
+
+            useEffect(() => {
+                if (!db) { setIsLoading(false); setLoadError(true); return; }
+                const unsub = db.collection(FLEET_COLLECTION).onSnapshot(
+                    s => { setVehicles(s.docs.map(d => d.data())); setIsLoading(false); },
+                    err => { console.error(err); setIsLoading(false); setLoadError(true); }
+                );
+                return () => unsub();
+            }, []);
+
+            useEffect(() => {
+                if (!fcDb) return;
+                (async () => {
+                    try {
+                        const [uSnap, aSnap, cSnap] = await Promise.all([
+                            fcDb.collection('ste_unidades').get(),
+                            fcDb.collection('ste_apartados').orderBy('orden').get(),
+                            fcDb.collection('ste_checklist').get(),
+                        ]);
+                        setFcUnidades(uSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+                        setFcApartados(aSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+                        const cm = {}; cSnap.docs.forEach(d => { cm[d.id] = d.data(); });
+                        setFcChecklist(cm);
+                    } catch (e) { console.error('Error cargando FleetCheck:', e); }
+                })();
+            }, []);
+
+            useEffect(() => {
+                if (!db) return;
+                const unsub = db.collection('incidents').onSnapshot(
+                    s => setIncidents(s.docs.map(d => ({ id: d.id, ...d.data() }))),
+                    err => console.error('Error cargando incidents:', err)
+                );
+                return () => unsub();
+            }, []);
+
+            // Mapa "ID de unidad" -> lista de fallas mecánicas registradas para esa unidad (más reciente primero)
+            const failuresByVehicle = useMemo(() => {
+                const m = {};
+                const dmyKey = dmy => { // "DD/MM/YY" -> "YY-MM-DD" comparable
+                    const [d, mo, y] = (dmy || '').split('/');
+                    return `${y || '00'}-${mo || '00'}-${d || '00'}`;
+                };
+                incidents.forEach(inc => {
+                    const arr = (inc.mechanicalFailuresDetails && inc.mechanicalFailuresDetails.length > 0)
+                        ? inc.mechanicalFailuresDetails
+                        : Array.from({ length: inc.mechanicalFailures || 0 }, () => null);
+                    arr.forEach(d => {
+                        if (!d || d.unitId === undefined || d.unitId === null || d.unitId === '') return;
+                        const key = String(d.unitId);
+                        if (!m[key]) m[key] = [];
+                        m[key].push({ date: inc.date, shift: inc.shift, plant: inc.plant, route: d.route || '', description: d.description || '' });
+                    });
+                });
+                Object.keys(m).forEach(key => m[key].sort((a, b) => dmyKey(b.date).localeCompare(dmyKey(a.date))));
+                return m;
+            }, [incidents]);
+
+            const fcByVehicleId = useMemo(() => {
+                const m = {};
+                fcUnidades.forEach(u => { m[String(u.numero)] = u; });
+                return m;
+            }, [fcUnidades]);
+
+            // Mapa vehicleId -> {unidadId, revisado, total, pctRevisado, score, tier} para no recalcular por celda
+            const fcInfoByVehicle = useMemo(() => {
+                const m = {};
+                if (!fcApartados.length) return m;
+                vehicles.forEach(v => {
+                    const u = fcByVehicleId[String(v.vehicleId)];
+                    if (!u) { m[v.vehicleId] = null; return; }
+                    const s = fcUnitStats(fcApartados, fcChecklist, u.id);
+                    const score = fcComputeScore(fcApartados, fcChecklist, u.id);
+                    m[v.vehicleId] = { unidadId: u.id, ...s, score, tier: fcClassify(score) };
+                });
+                return m;
+            }, [vehicles, fcByVehicleId, fcApartados, fcChecklist]);
+
+            const handleLogin = e => {
+                e.preventDefault();
+                if (passwordInput === ADMIN_PASSWORD) { setIsAdmin(true); setShowLogin(false); setLoginError(false); setPasswordInput(''); showNotification('success', 'Modo Edición Activado'); }
+                else setLoginError(true);
+            };
+
+            const runSeed = async () => {
+                if (!db) return;
+                setSeeding(true);
+                try {
+                    const chunks = []; for (let i = 0; i < FLEET_SEED.length; i += 400) chunks.push(FLEET_SEED.slice(i, i + 400));
+                    for (const chunk of chunks) {
+                        const batch = db.batch();
+                        chunk.forEach(v => batch.set(db.collection(FLEET_COLLECTION).doc(String(v.vehicleId)), v, { merge: true }));
+                        await batch.commit();
+                    }
+                    showNotification('success', `${FLEET_SEED.length} unidades cargadas desde el Excel`);
+                } catch (e) { console.error(e); showNotification('error', 'Error al cargar datos'); }
+                setSeeding(false);
+            };
+
+            const saveVehicle = async (payload, isNew) => {
+                try {
+                    await db.collection(FLEET_COLLECTION).doc(String(payload.vehicleId)).set(payload, { merge: true });
+                    showNotification('success', isNew ? 'Unidad creada' : 'Unidad actualizada');
+                    setModalVehicle(null); setShowNewModal(false);
+                } catch (e) { console.error(e); showNotification('error', 'Error al guardar'); }
+            };
+
+            const deleteVehicle = async (v) => {
+                if (!confirm(`¿Eliminar la unidad ${v.vehicleId} (${v.plate})? Esta acción no se puede deshacer.`)) return;
+                try {
+                    await db.collection(FLEET_COLLECTION).doc(String(v.vehicleId)).delete();
+                    showNotification('success', 'Unidad eliminada'); setModalVehicle(null);
+                } catch (e) { console.error(e); showNotification('error', 'Error al eliminar'); }
+            };
+
+            const filteredVehicles = useMemo(() => plantFilter === 'Todas' ? vehicles : vehicles.filter(v => v.plant === plantFilter), [vehicles, plantFilter]);
+
+            const stats = useMemo(() => {
+                const list = filteredVehicles;
+                const total = list.length;
+                const evaluated = list.filter(v => v.mecanix !== null && v.mecanix !== undefined);
+                const sinEval = total - evaluated.length;
+                const avgScore = evaluated.length > 0 ? evaluated.reduce((s, v) => s + v.mecanix, 0) / evaluated.length : null;
+                const requierenRep = list.filter(v => (v.requiereReparacion || 0) > 0).length;
+                const curYear = new Date().getFullYear();
+                const avgAge = total > 0 ? list.reduce((s, v) => s + (curYear - (v.year || curYear)), 0) / total : 0;
+
+                const byYear = {};
+                list.forEach(v => { byYear[v.year] = (byYear[v.year] || 0) + 1; });
+                const yearData = Object.keys(byYear).sort().map(y => ({ label: y, val: byYear[y] }));
+
+                const byYearNoCumple = {};
+                list.filter(v => (v.year || 0) <= NO_CUMPLE_YEAR_MAX).forEach(v => { byYearNoCumple[v.year] = (byYearNoCumple[v.year] || 0) + 1; });
+                const noCumpleYearData = Object.keys(byYearNoCumple).sort().map(y => ({ label: y, val: byYearNoCumple[y] }));
+                const noCumpleTotal = Object.values(byYearNoCumple).reduce((s, n) => s + n, 0);
+
+                const byBucket = { exc: 0, bueno: 0, reg: 0, atn: 0, sin: 0 };
+                list.forEach(v => { byBucket[scoreBucket(v.mecanix).key]++; });
+                const bucketMeta = { exc: { label: 'Excelente', color: '#10b981' }, bueno: { label: 'Bueno', color: '#0ea5e9' }, reg: { label: 'Regular', color: '#f59e0b' }, atn: { label: 'Atención', color: '#e11d48' }, sin: { label: 'Sin evaluar', color: '#94a3b8' } };
+                const bucketData = Object.keys(bucketMeta).map(k => ({ label: bucketMeta[k].label, val: byBucket[k], color: bucketMeta[k].color }));
+
+                const byType = {};
+                list.forEach(v => { byType[v.type] = (byType[v.type] || 0) + 1; });
+                const typeColors = { 'Camion': '#e11d48', 'Camioneta': '#0ea5e9' };
+                const typeData = Object.keys(byType).map(t => ({ label: t === 'Camion' ? 'Camión' : t, val: byType[t], color: typeColors[t] || '#94a3b8' }));
+
+                const plantScoreData = PLANT_ORDER.map(p => {
+                    const pl = list.filter(v => v.plant === p);
+                    const ev = pl.filter(v => v.mecanix !== null && v.mecanix !== undefined);
+                    const score = ev.length > 0 ? ev.reduce((s, v) => s + v.mecanix, 0) / ev.length : null;
+                    return { key: p, code: AREA_META[p].code, color: AREA_META[p].color, score, n: pl.length };
+                });
+
+                const topAttention = [...list].filter(v => (v.requiereReparacion || 0) > 0 || (v.mecanix !== null && v.mecanix < 0.9))
+                    .sort((a, b) => (b.requiereReparacion || 0) - (a.requiereReparacion || 0) || (a.mecanix ?? 1) - (b.mecanix ?? 1)).slice(0, 5);
+
+                return { total, sinEval, avgScore, requierenRep, avgAge, yearData, noCumpleYearData, noCumpleTotal, bucketData, typeData, plantScoreData, topAttention };
+            }, [filteredVehicles]);
+
+            const grouped = useMemo(() => {
+                const g = {}; PLANT_ORDER.forEach(p => g[p] = []);
+                filteredVehicles.forEach(v => { if (g[v.plant]) g[v.plant].push(v); else g[v.plant] = [v]; });
+                Object.keys(g).forEach(p => g[p].sort((a, b) => a.vehicleId - b.vehicleId));
+                return g;
+            }, [filteredVehicles]);
+
+            const plantsToShow = plantFilter === 'Todas' ? PLANT_ORDER : [plantFilter];
+
+            return (
+                <div className="min-h-screen pb-12">
+                    <header className="bg-slate-900 text-white shadow-lg sticky top-0 z-30">
+                        <div className="max-w-7xl mx-auto px-4 py-4 flex flex-col lg:flex-row justify-between items-center gap-4">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2 bg-rose-600 rounded-lg"><Icons.Truck /></div>
+                                <div><h1 className="text-xl font-bold flex items-center gap-2">Flota Stellantis {isLoading && <span className="loader"></span>}</h1><p className="text-xs text-slate-400">Norte · Van · Extensión · Camiones · Sur — condición mecánica y documentación</p></div>
+                            </div>
+                            <div className="flex gap-3 items-center flex-wrap justify-center">
+                                <div className="flex items-center bg-slate-800 border border-slate-700 rounded overflow-hidden text-sm">
+                                    <a href="index.html" title="Inicio" className="px-2.5 py-1.5 text-slate-300 hover:bg-slate-700 border-r border-slate-700 flex items-center"><Icons.Home /></a>
+                                    <a href="Matriz_Cumplimiento_Transporte.html" className="px-3 py-1.5 text-slate-300 hover:bg-slate-700 flex items-center gap-1.5"><Icons.Table />Matriz</a>
+                                    <span className="px-3 py-1.5 bg-rose-600 text-white flex items-center gap-1.5"><Icons.Truck />Flota</span>
+                                    <a href="inspeccion_unidades_stellantis.html" className="px-3 py-1.5 text-slate-300 hover:bg-slate-700 flex items-center gap-1.5 border-l border-slate-700" title="Ir al dashboard de Inspección de Unidades"><Icons.CheckCircle />Inspección</a>
+                                </div>
+                                <div className="relative"><span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500"><Icons.Search /></span><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar ID o placa..." className="bg-slate-800 border border-slate-700 rounded pl-8 pr-3 py-1.5 text-sm w-44 outline-none focus:border-rose-500" /></div>
+                                <select className="bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm" value={plantFilter} onChange={e => setPlantFilter(e.target.value)}>
+                                    <option value="Todas">Todas las plantas</option>
+                                    {PLANT_ORDER.map(p => <option key={p} value={p}>{AREA_META[p].code} · {AREA_META[p].label}</option>)}
+                                </select>
+                                {isAdmin ? (
+                                    <>
+                                        <button onClick={() => setShowNewModal(true)} className="bg-rose-600 hover:bg-rose-700 px-3 py-1.5 rounded text-sm flex items-center gap-2"><Icons.Plus /> Unidad</button>
+                                        <button onClick={() => { setIsAdmin(false); showNotification('success', 'Modo Vista Activado'); }} className="bg-slate-700 hover:bg-slate-600 px-3 py-1.5 rounded text-sm flex items-center gap-2" title="Salir modo admin"><Icons.LogOut /> Salir</button>
+                                    </>
+                                ) : (
+                                    <button onClick={() => setShowLogin(true)} className="bg-slate-800 border border-slate-700 hover:bg-slate-700 px-3 py-1.5 rounded text-sm flex items-center gap-2 text-slate-300" title="Ingresar como Admin"><Icons.Lock /> Admin</button>
+                                )}
+                            </div>
+                        </div>
+                    </header>
+
+                    {notification && <div className={`fixed top-20 right-4 p-4 rounded shadow-lg z-50 text-white ${notification.type === 'success' ? 'bg-emerald-600' : 'bg-red-600'}`}>{notification.message}</div>}
+
+                    {showLogin && (
+                        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                            <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-sm fade-in">
+                                <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-lg text-slate-800">Acceso Administrador</h3><button onClick={() => { setShowLogin(false); setLoginError(false); setPasswordInput(''); }} className="text-slate-400 hover:text-slate-600"><Icons.X /></button></div>
+                                <form onSubmit={handleLogin} className="space-y-4">
+                                    <div><label className="text-xs font-bold text-slate-500 mb-1 block">Contraseña</label><input type="password" autoFocus value={passwordInput} onChange={e => setPasswordInput(e.target.value)} className="w-full border rounded p-2 outline-none focus:border-rose-500" placeholder="••••••" />
+                                    {loginError && <p className="text-xs text-red-500 mt-1">Contraseña incorrecta.</p>}</div>
+                                    <button type="submit" className="w-full bg-slate-900 text-white py-2 rounded font-bold hover:bg-slate-800">Ingresar</button>
+                                </form>
+                            </div>
+                        </div>
+                    )}
+
+                    <main className="max-w-7xl mx-auto px-4 py-8 space-y-8">
+                        {loadError && <div className="text-xs bg-amber-50 text-amber-700 border border-amber-200 px-3 py-2 rounded-lg">No fue posible conectar con la base de datos en vivo — verifica tu conexión.</div>}
+
+                        {!isLoading && vehicles.length === 0 && !loadError && (
+                            <div className="bg-white border border-dashed border-slate-300 rounded-xl p-8 text-center space-y-3">
+                                <p className="text-slate-500 text-sm">Aún no hay unidades cargadas en la base de datos.</p>
+                                <button onClick={runSeed} disabled={seeding} className="bg-rose-600 hover:bg-rose-700 text-white px-4 py-2 rounded text-sm inline-flex items-center gap-2 disabled:opacity-60">{seeding && <span className="loader-sm"></span>}Cargar {FLEET_SEED.length} unidades desde el Excel</button>
+                            </div>
+                        )}
+
+                        {/* KPIs */}
+                        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+                            <StatCard title="Total de unidades" value={stats.total} icon={Icons.Truck} color="#1e293b" />
+                            <StatCard title="Sin evaluación" value={stats.sinEval} icon={Icons.AlertTriangle} color="#94a3b8" />
+                            <StatCard title="Score Mecanix promedio" value={stats.avgScore !== null ? (stats.avgScore * 100).toFixed(1) : '—'} suffix={stats.avgScore !== null ? '%' : ''} icon={Icons.Wrench} color="#10b981" />
+                            <StatCard title="Requieren reparación" value={stats.requierenRep} icon={Icons.AlertTriangle} color="#e11d48" />
+                            <StatCard title="Antigüedad promedio" value={stats.avgAge.toFixed(1)} suffix=" años" icon={Icons.Calendar} color="#0ea5e9" />
+                        </div>
+
+                        {/* GRÁFICOS PRINCIPALES */}
+                        <div>
+                            <h3 className="text-lg font-bold text-slate-700 mb-4 flex items-center gap-2"><span className="bg-slate-200 p-1 rounded"><Icons.BarChart2 /></span> Panorama de la flota{plantFilter !== 'Todas' ? ` — ${AREA_META[plantFilter].label}` : ''}</h3>
+                            <div className="grid grid-cols-1 xl:grid-cols-4 gap-5">
+                                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                                    <h5 className="text-xs font-bold text-slate-600 mb-3 uppercase tracking-wider">Unidades por Modelo (Año)</h5>
+                                    <BarChartOrdinal data={stats.yearData} color="#1e293b" />
+                                </div>
+                                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                                    <h5 className="text-xs font-bold text-slate-600 mb-3 uppercase tracking-wider flex items-center justify-between">
+                                        <span>Unidades que no cumplen por Modelo</span>
+                                        <span className="text-[10px] bg-rose-100 text-rose-600 px-2 py-0.5 rounded-full normal-case font-bold">{stats.noCumpleTotal}</span>
+                                    </h5>
+                                    {stats.noCumpleYearData.length > 0
+                                        ? <BarChartOrdinal data={stats.noCumpleYearData} color="#e11d48" />
+                                        : <div className="h-[150px] flex items-center justify-center text-slate-300 text-xs text-center px-4">Todas las unidades cumplen (modelo {NO_CUMPLE_YEAR_MAX + 1}+)</div>}
+                                    <p className="text-[10px] text-slate-400 mt-2">No cumplen: modelo {NO_CUMPLE_YEAR_MAX} o anterior.</p>
+                                </div>
+                                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col items-center">
+                                    <DonutChart title="Calificación Mecanix" data={stats.bucketData} />
+                                </div>
+                                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                                    <h5 className="text-xs font-bold text-slate-600 mb-3 uppercase tracking-wider">Score promedio por Planta</h5>
+                                    <PlantScoreBars data={stats.plantScoreData} />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+                            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col items-center">
+                                <DonutChart title="Tipo de Vehículo" data={stats.typeData} />
+                            </div>
+                            <div className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                                <div className="p-4 bg-slate-50 font-bold border-b flex justify-between items-center text-sm"><span className="flex gap-2 items-center"><span className="text-rose-500"><Icons.AlertTriangle /></span> Unidades que requieren atención</span><span className="text-xs bg-rose-100 text-rose-700 px-2 py-1 rounded-full">{stats.topAttention.length}</span></div>
+                                <div className="max-h-64 overflow-y-auto">
+                                    <table className="w-full text-sm text-left">
+                                        <thead className="bg-slate-50 text-slate-500 text-xs"><tr><th className="p-3">ID</th><th className="p-3">Placas</th><th className="p-3">Planta</th><th className="p-3 text-center">Mecanix</th><th className="p-3 text-center">Req. Rep.</th></tr></thead>
+                                        <tbody className="divide-y">
+                                            {stats.topAttention.length === 0 && <tr><td colSpan="5" className="p-6 text-center text-slate-400">Sin unidades críticas por el momento.</td></tr>}
+                                            {stats.topAttention.map(v => {
+                                                const b = scoreBucket(v.mecanix);
+                                                return (
+                                                    <tr key={v.vehicleId} className="hover:bg-slate-50 cursor-pointer" onClick={() => setModalVehicle(v)}>
+                                                        <td className="p-3 font-bold text-slate-700">{v.vehicleId}</td>
+                                                        <td className="p-3 text-slate-600">{v.plate}</td>
+                                                        <td className="p-3 text-slate-500 text-xs">{AREA_META[v.plant] ? AREA_META[v.plant].code : v.plant}</td>
+                                                        <td className="p-3 text-center"><span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: b.color + '1a', color: b.color }}>{fmtPct(v.mecanix)}</span></td>
+                                                        <td className="p-3 text-center font-bold text-rose-600">{v.requiereReparacion || 0}</td>
+                                                    </tr>
+                                                );
+                                            })}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* UNIDADES STELLANTIS (todas, un solo bloque con columna de Planta) */}
+                        <div>
+                            <h3 className="text-lg font-bold text-slate-700 mb-4 flex items-center gap-2"><span className="bg-slate-200 p-1 rounded"><Icons.Truck /></span> Unidades Stellantis</h3>
+                            <AllUnitsPanel vehicles={filteredVehicles} search={search} onOpenVehicle={setModalVehicle} fcInfoMap={fcInfoByVehicle} />
+                        </div>
+
+                        {/* LISTADO POR PLANTA */}
+                        <div>
+                            <h3 className="text-lg font-bold text-slate-700 mb-4 flex items-center gap-2"><span className="bg-slate-200 p-1 rounded"><Icons.Layers /></span> Unidades por planta</h3>
+                            <div className="space-y-3">
+                                {plantsToShow.map(p => <PlantPanel key={p} plantKey={p} vehicles={grouped[p] || []} search={search} defaultOpen={plantsToShow.length === 1} isAdmin={isAdmin} onOpenVehicle={setModalVehicle} fcInfoMap={fcInfoByVehicle} />)}
+                            </div>
+                        </div>
+                    </main>
+
+                    {modalVehicle && (
+                        <VehicleModal vehicle={modalVehicle} isAdmin={isAdmin} isNew={false}
+                            fcApartados={fcApartados} fcChecklist={fcChecklist} fcUnidad={fcByVehicleId[String(modalVehicle.vehicleId)] || null} fcDb={fcDb}
+                            failures={failuresByVehicle[String(modalVehicle.vehicleId)] || []}
+                            onClose={() => setModalVehicle(null)} onSave={saveVehicle} onDelete={deleteVehicle} showNotification={showNotification} />
+                    )}
+                    {showNewModal && (
+                        <VehicleModal vehicle={null} isAdmin={isAdmin} isNew={true}
+                            fcApartados={fcApartados} fcChecklist={fcChecklist} fcUnidad={null} fcDb={fcDb}
+                            failures={[]}
+                            onClose={() => setShowNewModal(false)} onSave={saveVehicle} onDelete={() => {}} showNotification={showNotification} />
+                    )}
+                </div>
+            );
+        };
+
+        const root = createRoot(document.getElementById('root'));
+        root.render(<FleetDashboard />);
+    </script>
+</body>
+</html>

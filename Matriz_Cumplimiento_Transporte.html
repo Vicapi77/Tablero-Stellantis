@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Matriz de Cumplimiento - Transporte</title>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone@7.29.7/babel.min.js"></script>
+
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+
+    <style>
+        body { background-color: #f8fafc; font-family: system-ui, -apple-system, sans-serif; }
+        .loader { border: 3px solid #f3f3f3; border-top: 3px solid #e11d48; border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite; display: inline-block; vertical-align: middle; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .fade-in { animation: fadeIn 0.2s ease-in-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: scale(0.97); } to { opacity: 1; transform: scale(1); } }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #f1f5f9; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        .cell-btn { transition: transform .12s ease, box-shadow .12s ease; }
+        .cell-btn:hover { transform: translateY(-1px); box-shadow: 0 2px 8px rgba(0,0,0,.08); z-index: 2; }
+        .matrix-tbl th, .matrix-tbl td { border: 1px solid #e2e8f0; }
+    </style>
+</head>
+<body>
+    <div id="root">
+        <div style="height: 100vh; display: flex; align-items: center; justify-content: center; color: #64748b;">
+            Cargando Matriz...
+        </div>
+    </div>
+
+    <script type="text/babel">
+        const { useState, useMemo, useEffect } = React;
+        const { createRoot } = ReactDOM;
+
+        // --- ICONOS ---
+        const Icons = {
+            Truck: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="16" height="13" x="1" y="5" rx="2" /><polygon points="16 8 20 8 23 11 23 16 16 16 16 8" /><circle cx="5.5" cy="18.5" r="2.5" /><circle cx="18.5" cy="18.5" r="2.5" /></svg>,
+            X: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>,
+            BarChart2: () => <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" x2="18" y1="20" y2="10"/><line x1="12" x2="12" y1="20" y2="4"/><line x1="6" x2="6" y1="20" y2="14"/></svg>,
+            Clock: () => <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>,
+            AlertOctagon: () => <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>,
+            Activity: () => <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>,
+            ArrowUpRight: () => <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M7 17 17 7"/><path d="M7 7h10v10"/></svg>,
+            ArrowDownRight: () => <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M7 7 17 17"/><path d="M17 7v10H7"/></svg>,
+            Calendar: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></svg>,
+            ChevronLeft: () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>,
+            ChevronRight: () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>,
+            Info: () => <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>,
+            Layers: () => <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.84l8.57 3.91a2 2 0 0 0 1.66 0l8.57-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/></svg>,
+            Table: () => <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3h18v18H3z"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M9 3v18"/></svg>,
+            Home: () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>,
+            CheckCircle: () => <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>,
+        };
+
+        // --- FIREBASE (misma base de datos que el dashboard operativo) ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyB5OvYG9qGFrwQGCIIk2ps6R7tBDrhHqrY",
+            authDomain: "kpis-stellantis.firebaseapp.com",
+            projectId: "kpis-stellantis",
+            storageBucket: "kpis-stellantis.firebasestorage.app",
+            messagingSenderId: "618714680596",
+            appId: "1:618714680596:web:8b7d14cb1dd4e6a9dd0601",
+            measurementId: "G-WDXSRLJ6VB"
+        };
+
+        let db;
+        try {
+            if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+            db = firebase.firestore();
+        } catch (error) { console.error("Error Firebase:", error); }
+
+        // --- MAPEO DE ÁREAS (código matriz -> planta del dashboard) ---
+        const AREA_ROWS = [
+            { code: 'SNEP', plant: 'Norte', color: '#0ea5e9' },
+            { code: 'SVAP', plant: 'Van', color: '#8b5cf6' },
+            { code: 'LD', plant: 'Extensión', color: '#14b8a6' },
+            { code: 'HD', plant: 'Camiones', color: '#f43f5e' },
+            { code: 'SSEP', plant: 'Sur', color: '#f59e0b' },
+        ];
+        const PLANTS = ['Todas', 'Camiones', 'Extensión', 'Van', 'Norte', 'Sur'];
+        const SHIFTS = [
+            { key: 'T1', label: '1er turno', head: 'bg-sky-100 text-sky-800 border-sky-200' },
+            { key: 'T2', label: '2do turno', head: 'bg-orange-100 text-orange-800 border-orange-200' },
+            { key: 'T3', label: '3er turno', head: 'bg-cyan-100 text-cyan-800 border-cyan-200' },
+        ];
+        const ACC_COLS = [
+            { key: 'A', label: 'A', head: 'bg-red-600', name: 'Accidente Grave' },
+            { key: 'B', label: 'B', head: 'bg-orange-500', name: 'Accidente Moderado' },
+            { key: 'C', label: 'C', head: 'bg-amber-400', name: 'Falla Mecánica' },
+        ];
+
+        const CAUSE_LABELS_IMP = [
+            ['causeImpSleep', 'Op. Dormido'], ['causeImpAccident', 'Siniestro'], ['causeImpRoute', 'Desvío Ruta'], ['causeImpMech', 'Falla Mec.'],
+            ['causeImpSupervisor', 'Supervisor'], ['causeImpAttitude', 'Actitud de Op'], ['causeImpDriving', 'Mal Manejo'], ['causeImpFlatTire', 'Ponchadura'],
+            ['causeImpAlcohol', 'Alcoholemia'], ['causeImpDiesel', 'Diesel'], ['causeImpOpTheme', 'Tema de Op.']
+        ];
+        const CAUSE_LABELS_NOIMP = [
+            ['causeNoImpTraffic', 'Tráfico'], ['causeNoImpClosed', 'Calle Cerrada'], ['causeNoImpWeather', 'Clima'], ['causeNoImpOther', 'Otros'],
+            ['causeNoImpCrashNoResp', 'Percance S/R'], ['causeNoImpTrain', 'Tren'], ['causeNoImpVandalism', 'Vandalismo'], ['causeNoImpOvercapacity', 'Sobreaforo'],
+            ['causeNoImpPublicEvent', 'Evento Público'], ['causeNoImpProtest', 'Manifestación'], ['causeNoImpPublicWork', 'Obra Pública'], ['causeNoImpThirdPartyCrash', 'Acc. Terceros']
+        ];
+
+        // --- HELPERS DE FECHA (evitando corrimientos por zona horaria) ---
+        const pad2 = n => n.toString().padStart(2, '0');
+        const isoToParts = iso => { const [y, m, d] = iso.split('-').map(Number); return { y, m, d }; };
+        const isoToDMY = iso => { const { y, m, d } = isoToParts(iso); return `${pad2(d)}/${pad2(m)}/${y.toString().slice(-2)}`; };
+        const isoAddDays = (iso, delta) => {
+            const { y, m, d } = isoToParts(iso);
+            const dt = new Date(Date.UTC(y, m - 1, d));
+            dt.setUTCDate(dt.getUTCDate() + delta);
+            return `${dt.getUTCFullYear()}-${pad2(dt.getUTCMonth() + 1)}-${pad2(dt.getUTCDate())}`;
+        };
+        const isoWeekdayShort = iso => {
+            const { y, m, d } = isoToParts(iso);
+            const dt = new Date(Date.UTC(y, m - 1, d));
+            return dt.toLocaleDateString('es-ES', { weekday: 'short', timeZone: 'UTC' }).toUpperCase().replace('.', '');
+        };
+        const isoLongLabel = iso => {
+            const { y, m, d } = isoToParts(iso);
+            const dt = new Date(Date.UTC(y, m - 1, d));
+            const s = dt.toLocaleDateString('es-ES', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric', timeZone: 'UTC' });
+            return s.charAt(0).toUpperCase() + s.slice(1);
+        };
+        const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
+
+        // --- MINI GRÁFICA DE TENDENCIA (línea, 7 puntos) ---
+        const TrendLine = ({ data, dataKey, color, title, icon: Icon, suffix = '', highlightMaxDay = false }) => {
+            const values = data.map(d => d[dataKey]);
+            const min = Math.min(...values, 0); const max = Math.max(...values, 1);
+            const pad = (max - min) * 0.25 || 1; const domainMin = Math.max(0, min - pad); const domainMax = max + pad; const range = (domainMax - domainMin) || 1;
+            const width = 320; const height = 130; const marginX = 22; const marginY = 26;
+            const xAt = i => marginX + (i / (data.length - 1)) * (width - 2 * marginX);
+            const yAt = v => height - marginY - ((v - domainMin) / range) * (height - 2 * marginY);
+            const points = data.map((d, i) => `${xAt(i)},${yAt(d[dataKey])}`).join(' ');
+            const areaPts = `${xAt(0)},${height - marginY} ` + points + ` ${xAt(data.length - 1)},${height - marginY}`;
+            const gid = 'grad-' + dataKey;
+            const maxIdx = values.indexOf(Math.max(...values));
+            const [hover, setHover] = useState(null);
+            return (
+                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                    <h5 className="text-xs font-bold text-slate-600 mb-1 uppercase tracking-wider flex items-center gap-1.5">{Icon && <span style={{ color }}><Icon /></span>}{title}</h5>
+                    <p className="text-[10px] text-slate-400 mb-2">Últimos 7 días · {selectedPlantLabelGlobal}</p>
+                    <div className="relative w-full flex justify-center">
+                        <svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} className="overflow-visible">
+                            <defs><linearGradient id={gid} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={color} stopOpacity="0.22" /><stop offset="100%" stopColor={color} stopOpacity="0" /></linearGradient></defs>
+                            {[0.25, 0.5, 0.75].map((f, i) => <line key={i} x1={marginX} x2={width - marginX} y1={marginY + f * (height - 2 * marginY)} y2={marginY + f * (height - 2 * marginY)} stroke="#f1f5f9" strokeWidth="1" />)}
+                            <polygon points={areaPts} fill={`url(#${gid})`} />
+                            <polyline points={points} fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                            {data.map((d, i) => (
+                                <g key={i} onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)} style={{ cursor: 'pointer' }}>
+                                    <circle cx={xAt(i)} cy={yAt(d[dataKey])} r={hover === i ? 6 : (highlightMaxDay && i === maxIdx ? 5 : 4)} fill="white" stroke={color} strokeWidth={hover === i ? 3 : 2} />
+                                    <rect x={xAt(i) - 14} y={height - marginY + 6} width="28" height="12" fill="transparent" />
+                                    {(hover === i || i === data.length - 1 || (highlightMaxDay && i === maxIdx)) && <text x={xAt(i)} y={yAt(d[dataKey]) - 10} textAnchor="middle" fontSize="10.5" fill="#334155" fontWeight="700">{d[dataKey]}{suffix}</text>}
+                                    <text x={xAt(i)} y={height - marginY + 16} textAnchor="middle" fontSize="9" fill="#94a3b8">{d.dayName}</text>
+                                    <text x={xAt(i)} y={height - marginY + 26} textAnchor="middle" fontSize="8" fill="#cbd5e1">{d.date.slice(0, 5)}</text>
+                                    {hover === i && <title>{`${d.dayName} ${d.date}: ${d[dataKey]}${suffix}`}</title>}
+                                </g>
+                            ))}
+                        </svg>
+                    </div>
+                </div>
+            );
+        };
+
+        let selectedPlantLabelGlobal = 'Todas las áreas';
+
+        // --- GRÁFICA DE BARRAS: TURNO CON MÁS AFECTACIÓN ---
+        const ShiftBarChart = ({ data }) => {
+            const max = Math.max(...data.map(d => d.total), 1);
+            const maxIdx = data.map(d => d.total).indexOf(Math.max(...data.map(d => d.total)));
+            const colorFor = k => k === 'T1' ? '#0284c7' : k === 'T2' ? '#ea580c' : '#0891b2';
+            return (
+                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                    <h5 className="text-xs font-bold text-slate-600 mb-1 uppercase tracking-wider flex items-center gap-1.5"><span className="text-violet-500"><Icons.Layers /></span> Turno con más afectación</h5>
+                    <p className="text-[10px] text-slate-400 mb-3">Suma de arranques + llegadas fuera de tiempo · últimos 7 días · {selectedPlantLabelGlobal}</p>
+                    <div className="flex items-end justify-around gap-4 h-[130px]">
+                        {data.map((d, i) => (
+                            <div key={d.key} className="flex-1 flex flex-col items-center justify-end h-full group">
+                                <span className="text-sm font-extrabold text-slate-700 mb-1">{d.total}</span>
+                                <div className="w-full max-w-[46px] rounded-t-lg relative" style={{ height: `${Math.max(6, (d.total / max) * 90)}%`, backgroundColor: colorFor(d.key), opacity: i === maxIdx && d.total > 0 ? 1 : 0.55 }}>
+                                    {i === maxIdx && d.total > 0 && <span className="absolute -top-6 left-1/2 -translate-x-1/2 text-[9px] font-bold bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded-full whitespace-nowrap">MAYOR</span>}
+                                </div>
+                                <span className="mt-2 text-[11px] font-bold text-slate-600">{SHIFTS.find(s => s.key === d.key).label}</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+        };
+
+        // --- TARJETA KPI COMPACTA ---
+        const StatCard = ({ title, value, suffix = '', icon: Icon, color }) => (
+            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-3">
+                <div className="p-2.5 rounded-lg" style={{ backgroundColor: color + '1a', color }}><Icon /></div>
+                <div><p className="text-[11px] text-slate-500 font-medium leading-tight">{title}</p><p className="text-xl font-bold text-slate-800 leading-tight">{value}<span className="text-sm text-slate-400 ml-0.5">{suffix}</span></p></div>
+            </div>
+        );
+
+        // --- CELDA DE MATRIZ (clicable) ---
+        const MatrixCell = ({ value, onClick, tone = 'auto' }) => {
+            const zero = value === 0;
+            const cls = zero ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-100 text-rose-700';
+            return (
+                <td className="p-0 text-center align-middle">
+                    <button onClick={onClick} className={`cell-btn w-full h-full py-2.5 font-bold text-sm ${cls}`} title="Ver detalle">
+                        {value}
+                    </button>
+                </td>
+            );
+        };
+
+        // --- MODAL DE DETALLE ---
+        const DetailModal = ({ info, onClose }) => {
+            if (!info) return null;
+            return (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={onClose}>
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col fade-in" onClick={e => e.stopPropagation()}>
+                        <div className="bg-slate-900 p-4 flex justify-between items-start text-white rounded-t-2xl">
+                            <div><h2 className="font-bold text-base">{info.title}</h2><p className="text-xs text-slate-400 mt-0.5">{info.subtitle}</p></div>
+                            <button onClick={onClose} className="text-slate-300 hover:text-white"><Icons.X /></button>
+                        </div>
+                        <div className="p-5 overflow-y-auto space-y-4">
+                            {info.note && <div className="text-xs bg-amber-50 text-amber-700 border border-amber-200 rounded-lg p-3 flex gap-2 items-start"><span className="mt-0.5"><Icons.Info /></span>{info.note}</div>}
+                            {info.summary && info.summary.length > 0 && (
+                                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                                    {info.summary.map((s, i) => <div key={i} className="bg-slate-50 border border-slate-200 rounded-lg p-2 text-center"><p className="text-[10px] text-slate-500">{s.label}</p><p className="text-lg font-bold text-slate-800">{s.value}</p></div>)}
+                                </div>
+                            )}
+                            {info.rows && info.rows.length > 0 ? (
+                                <table className="w-full text-xs text-left border-collapse">
+                                    <thead className="bg-slate-50 text-slate-500"><tr>{info.columns.map((c, i) => <th key={i} className="p-2 border-b border-slate-200">{c}</th>)}</tr></thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                        {info.rows.map((r, i) => <tr key={i} className="hover:bg-slate-50">{r.map((c, j) => <td key={j} className="p-2">{c}</td>)}</tr>)}
+                                    </tbody>
+                                </table>
+                            ) : (
+                                <div className="text-center text-slate-400 text-sm py-8">Sin incidencias registradas para este cruce.</div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- DASHBOARD PRINCIPAL: MATRIZ DE CUMPLIMIENTO ---
+        const MatrixDashboard = () => {
+            const [incidents, setIncidents] = useState([]);
+            const [dailyMetrics, setDailyMetrics] = useState([]);
+            const [isLoading, setIsLoading] = useState(true);
+            const [loadError, setLoadError] = useState(false);
+            const [selectedDate, setSelectedDate] = useState(todayISO());
+            const [selectedPlant, setSelectedPlant] = useState('Todas');
+            const [detailInfo, setDetailInfo] = useState(null);
+
+            useEffect(() => {
+                if (!db) { setIsLoading(false); setLoadError(true); return; }
+                const unsub = db.collection("incidents").onSnapshot(
+                    s => { setIncidents(s.docs.map(d => ({ id: d.id, ...d.data() }))); setIsLoading(false); },
+                    err => { console.error(err); setIsLoading(false); setLoadError(true); }
+                );
+                const unsub2 = db.collection("daily_metrics").onSnapshot(s => { setDailyMetrics(s.docs.map(d => ({ id: d.id, ...d.data() }))); });
+                return () => { unsub(); unsub2(); };
+            }, []);
+
+            // Nivel de servicio por fecha+planta: prioriza la colección nueva "daily_metrics"
+            // (carga por día) y cae en el valor legado embebido en el incidente si no hay dato nuevo.
+            const metricsMap = useMemo(() => {
+                const map = {};
+                dailyMetrics.forEach(m => { map[`${m.date}_${m.plant}`] = m; });
+                return map;
+            }, [dailyMetrics]);
+            const serviceLevelFor = (date, plant) => {
+                const dm = metricsMap[`${date}_${plant}`];
+                return dm ? dm.serviceLevel : null;
+            };
+
+            selectedPlantLabelGlobal = selectedPlant === 'Todas' ? 'Todas las áreas' : selectedPlant;
+
+            // ---- MATRIZ DEL DÍA SELECCIONADO (siempre todas las áreas) ----
+            const matrix = useMemo(() => {
+                const dmy = isoToDMY(selectedDate);
+                const dayIncidents = incidents.filter(i => i.date === dmy);
+                const rows = AREA_ROWS.map(area => {
+                    const areaIncidents = dayIncidents.filter(i => i.plant === area.plant);
+                    const shiftsData = SHIFTS.map(sh => {
+                        const list = areaIncidents.filter(i => i.shift === sh.key);
+                        const arranques = list.reduce((s, i) => s + (i.lateStarts || 0) + (i.lateStartsNoAff || 0), 0);
+                        const llegadas = list.reduce((s, i) => s + (i.imp || 0) + (i.noImp || 0), 0);
+                        return { key: sh.key, arranques, llegadas, list };
+                    });
+                    // Accidentes clasificados por severidad (grave/moderado). Los registros cargados antes de esta
+                    // clasificación no traen accidentsDetails; se asumen "moderado" para no perder el conteo histórico.
+                    let accGrave = 0, accMod = 0;
+                    areaIncidents.forEach(i => {
+                        const det = (i.accidentsDetails && i.accidentsDetails.length > 0) ? i.accidentsDetails : Array.from({ length: i.accidents || 0 }, () => ({ severity: 'moderado' }));
+                        det.forEach(d => { if ((d.severity || 'moderado') === 'grave') accGrave++; else accMod++; });
+                    });
+                    const mechCount = areaIncidents.reduce((s, i) => s + (i.mechanicalFailures || 0), 0);
+                    return {
+                        area, shiftsData, acc: { A: accGrave, B: accMod, C: mechCount },
+                        accList: areaIncidents.filter(i => (i.accidents || 0) > 0),
+                        mechList: areaIncidents.filter(i => (i.mechanicalFailures || 0) > 0)
+                    };
+                });
+                const totals = {
+                    shifts: SHIFTS.map(sh => ({
+                        key: sh.key,
+                        arranques: rows.reduce((s, r) => s + r.shiftsData.find(x => x.key === sh.key).arranques, 0),
+                        llegadas: rows.reduce((s, r) => s + r.shiftsData.find(x => x.key === sh.key).llegadas, 0)
+                    })),
+                    acc: {
+                        A: rows.reduce((s, r) => s + r.acc.A, 0),
+                        B: rows.reduce((s, r) => s + r.acc.B, 0),
+                        C: rows.reduce((s, r) => s + r.acc.C, 0)
+                    }
+                };
+                return { dmy, rows, totals, dayIncidents };
+            }, [incidents, selectedDate]);
+
+            // ---- VENTANA DE 7 DÍAS (respeta filtro de planta) PARA TENDENCIAS ----
+            const trend = useMemo(() => {
+                const days = [];
+                for (let off = -6; off <= 0; off++) {
+                    const iso = isoAddDays(selectedDate, off);
+                    const dmy = isoToDMY(iso);
+                    const list = incidents.filter(i => i.date === dmy && (selectedPlant === 'Todas' || i.plant === selectedPlant));
+                    const arranques = list.reduce((s, i) => s + (i.lateStarts || 0) + (i.lateStartsNoAff || 0), 0);
+                    const llegadas = list.reduce((s, i) => s + (i.imp || 0) + (i.noImp || 0), 0);
+                    const accidents = list.reduce((s, i) => s + (i.accidents || 0), 0);
+                    const byShift = { T1: 0, T2: 0, T3: 0 };
+                    SHIFTS.forEach(sh => {
+                        const sl = list.filter(i => i.shift === sh.key);
+                        byShift[sh.key] = sl.reduce((s, i) => s + (i.lateStarts || 0) + (i.lateStartsNoAff || 0) + (i.imp || 0) + (i.noImp || 0), 0);
+                    });
+                    days.push({ date: dmy, dayName: isoWeekdayShort(iso), arranques, llegadas, accidents, byShift });
+                }
+                const shiftTotals = SHIFTS.map(sh => ({ key: sh.key, total: days.reduce((s, d) => s + d.byShift[sh.key], 0) }));
+                return { days, shiftTotals };
+            }, [incidents, selectedDate, selectedPlant]);
+
+            // ---- TABLA DE DETALLE (día + planta seleccionados) ----
+            const detailTable = useMemo(() => {
+                return matrix.dayIncidents.filter(i => selectedPlant === 'Todas' || i.plant === selectedPlant)
+                    .sort((a, b) => a.plant.localeCompare(b.plant) || a.shift.localeCompare(b.shift));
+            }, [matrix, selectedPlant]);
+
+            const dayStats = useMemo(() => {
+                const list = matrix.dayIncidents;
+                const arranques = list.reduce((s, i) => s + (i.lateStarts || 0) + (i.lateStartsNoAff || 0), 0);
+                const llegadas = list.reduce((s, i) => s + (i.imp || 0) + (i.noImp || 0), 0);
+                const accidents = list.reduce((s, i) => s + (i.accidents || 0), 0);
+                const cruces = AREA_ROWS.length * SHIFTS.length;
+                const crucesLimpios = matrix.rows.reduce((s, r) => s + r.shiftsData.filter(sd => sd.arranques === 0 && sd.llegadas === 0).length, 0);
+                const cumplimiento = cruces > 0 ? ((crucesLimpios / cruces) * 100).toFixed(0) : 100;
+                return { arranques, llegadas, accidents, cumplimiento };
+            }, [matrix]);
+
+            const causeSummary = (list, causeDefs) => {
+                const sums = causeDefs.map(([key, label]) => ({ label, val: list.reduce((s, i) => s + (i[key] || 0), 0) }));
+                return sums.filter(s => s.val > 0).sort((a, b) => b.val - a.val).slice(0, 6);
+            };
+
+            // Aplana el detalle por ocurrencia (ruta + minutos tarde) capturado en el reporte.
+            // Si un registro no trae el arreglo de detalle (reportes cargados antes de esta función),
+            // se generan filas vacías para no perder el conteo total.
+            const minutesOrDash = d => (d && d.minutes !== '' && d.minutes !== undefined && d.minutes !== null) ? d.minutes : '-';
+            const routeOrDash = d => (d && d.route) ? d.route : '-';
+
+            const flattenLateStarts = (list) => {
+                const rows = [];
+                list.forEach(i => {
+                    const cAff = (i.lateStartsDetails && i.lateStartsDetails.length > 0) ? i.lateStartsDetails : Array.from({ length: i.lateStarts || 0 }, () => null);
+                    cAff.forEach(d => rows.push([i.date, i.shift, 'C/Afect.', routeOrDash(d), minutesOrDash(d)]));
+                    const sAff = (i.lateStartsNoAffDetails && i.lateStartsNoAffDetails.length > 0) ? i.lateStartsNoAffDetails : Array.from({ length: i.lateStartsNoAff || 0 }, () => null);
+                    sAff.forEach(d => rows.push([i.date, i.shift, 'S/Afect.', routeOrDash(d), minutesOrDash(d)]));
+                });
+                return rows;
+            };
+
+            const flattenCauses = (list, causeDefs, tag) => {
+                const rows = [];
+                list.forEach(i => {
+                    causeDefs.forEach(([key, label]) => {
+                        const arr = (i[key + 'Details'] && i[key + 'Details'].length > 0) ? i[key + 'Details'] : Array.from({ length: i[key] || 0 }, () => null);
+                        arr.forEach(d => rows.push([i.date, i.shift, tag, label, routeOrDash(d), minutesOrDash(d)]));
+                    });
+                });
+                return rows;
+            };
+
+            const openArranquesDetail = (area, sh) => {
+                const list = matrix.rows.find(r => r.area.code === area.code).shiftsData.find(s => s.key === sh.key).list;
+                setDetailInfo({
+                    title: `Arranques fuera de tiempo — ${area.code} (${area.plant})`,
+                    subtitle: `${sh.label} · ${isoLongLabel(selectedDate)}`,
+                    summary: [
+                        { label: 'Con afectación', value: list.reduce((s, i) => s + (i.lateStarts || 0), 0) },
+                        { label: 'Sin afectación', value: list.reduce((s, i) => s + (i.lateStartsNoAff || 0), 0) },
+                        { label: 'Registros', value: list.length }
+                    ],
+                    columns: ['Fecha', 'Turno', 'Tipo', 'Ruta', 'Min. Tarde'],
+                    rows: flattenLateStarts(list)
+                });
+            };
+
+            const openLlegadasDetail = (area, sh) => {
+                const list = matrix.rows.find(r => r.area.code === area.code).shiftsData.find(s => s.key === sh.key).list;
+                const impList = causeSummary(list, CAUSE_LABELS_IMP);
+                const noImpList = causeSummary(list, CAUSE_LABELS_NOIMP);
+                setDetailInfo({
+                    title: `Llegadas fuera de tiempo — ${area.code} (${area.plant})`,
+                    subtitle: `${sh.label} · ${isoLongLabel(selectedDate)} · Fallas imputables + no imputables`,
+                    summary: [
+                        { label: 'Imputables', value: list.reduce((s, i) => s + (i.imp || 0), 0) },
+                        { label: 'No imputables', value: list.reduce((s, i) => s + (i.noImp || 0), 0) },
+                        { label: 'Registros', value: list.length }
+                    ],
+                    note: (impList.length > 0 || noImpList.length > 0) ? (
+                        'Principales causas: ' +
+                        [...impList, ...noImpList].map(c => `${c.label} (${c.val})`).join(', ')
+                    ) : null,
+                    columns: ['Fecha', 'Turno', 'Tipo', 'Causa', 'Ruta', 'Min. Tarde'],
+                    rows: [...flattenCauses(list, CAUSE_LABELS_IMP, 'Imputable'), ...flattenCauses(list, CAUSE_LABELS_NOIMP, 'No Imp.')]
+                });
+            };
+
+            const openAccDetail = (area, col) => {
+                const row = matrix.rows.find(r => r.area.code === area.code);
+
+                if (col.key === 'C') {
+                    const rows = [];
+                    (row.mechList || []).forEach(i => {
+                        const arr = (i.mechanicalFailuresDetails && i.mechanicalFailuresDetails.length > 0) ? i.mechanicalFailuresDetails : Array.from({ length: i.mechanicalFailures || 0 }, () => null);
+                        arr.forEach(d => rows.push([i.date, i.shift, (d && d.route) || '-', (d && d.unitId) || '-', (d && d.description) || '-']));
+                    });
+                    setDetailInfo({
+                        title: `Fallas Mecánicas — ${area.code} (${area.plant})`,
+                        subtitle: isoLongLabel(selectedDate),
+                        summary: [{ label: 'Fallas mecánicas', value: row.acc.C }, { label: 'Registros', value: (row.mechList || []).length }],
+                        columns: ['Fecha', 'Turno', 'Ruta', 'ID Unidad', 'Falla'],
+                        rows
+                    });
+                    return;
+                }
+
+                const severityKey = col.key === 'A' ? 'grave' : 'moderado';
+                const rows = [];
+                (row.accList || []).forEach(i => {
+                    const det = (i.accidentsDetails && i.accidentsDetails.length > 0) ? i.accidentsDetails : Array.from({ length: i.accidents || 0 }, () => ({ severity: 'moderado', description: '' }));
+                    det.filter(d => (d.severity || 'moderado') === severityKey).forEach(d => rows.push([i.date, i.shift, d.description || '-']));
+                });
+                setDetailInfo({
+                    title: `Accidentes tipo ${col.key} (${col.name}) — ${area.code} (${area.plant})`,
+                    subtitle: isoLongLabel(selectedDate),
+                    summary: [{ label: col.name, value: row.acc[col.key] }, { label: 'Registros', value: (row.accList || []).length }],
+                    columns: ['Fecha', 'Turno', 'Descripción'],
+                    rows
+                });
+            };
+
+            const openTotalsDetail = (type, shKey) => {
+                if (type === 'acc') {
+                    const col = ACC_COLS.find(c => c.key === shKey);
+
+                    if (col.key === 'C') {
+                        const rows = [];
+                        matrix.rows.forEach(r => {
+                            (r.mechList || []).forEach(i => {
+                                const arr = (i.mechanicalFailuresDetails && i.mechanicalFailuresDetails.length > 0) ? i.mechanicalFailuresDetails : Array.from({ length: i.mechanicalFailures || 0 }, () => null);
+                                arr.forEach(d => rows.push([`${r.area.code} (${r.area.plant})`, i.date, i.shift, (d && d.route) || '-', (d && d.unitId) || '-', (d && d.description) || '-']));
+                            });
+                        });
+                        setDetailInfo({
+                            title: `Total Fallas Mecánicas — Todas las áreas`,
+                            subtitle: isoLongLabel(selectedDate),
+                            columns: ['Área', 'Fecha', 'Turno', 'Ruta', 'ID Unidad', 'Falla'],
+                            rows
+                        });
+                        return;
+                    }
+
+                    const severityKey = col.key === 'A' ? 'grave' : 'moderado';
+                    const rows = [];
+                    matrix.rows.forEach(r => {
+                        (r.accList || []).forEach(i => {
+                            const det = (i.accidentsDetails && i.accidentsDetails.length > 0) ? i.accidentsDetails : Array.from({ length: i.accidents || 0 }, () => ({ severity: 'moderado', description: '' }));
+                            det.filter(d => (d.severity || 'moderado') === severityKey).forEach(d => rows.push([`${r.area.code} (${r.area.plant})`, i.date, i.shift, d.description || '-']));
+                        });
+                    });
+                    setDetailInfo({
+                        title: `Total Accidentes tipo ${col.key} (${col.name}) — Todas las áreas`,
+                        subtitle: isoLongLabel(selectedDate),
+                        columns: ['Área', 'Fecha', 'Turno', 'Descripción'],
+                        rows
+                    });
+                    return;
+                }
+                const sh = SHIFTS.find(s => s.key === shKey);
+                setDetailInfo({
+                    title: `Total ${type === 'arranques' ? 'Arranques' : 'Llegadas'} fuera de tiempo — Todas las áreas`,
+                    subtitle: `${sh.label} · ${isoLongLabel(selectedDate)}`,
+                    columns: ['Área', type === 'arranques' ? 'Arranques' : 'Llegadas'],
+                    rows: matrix.rows.map(r => [`${r.area.code} (${r.area.plant})`, r.shiftsData.find(s => s.key === shKey)[type === 'arranques' ? 'arranques' : 'llegadas']]).filter(r => r[1] > 0)
+                });
+            };
+
+            const shiftDot = k => k === 'T1' ? 'bg-sky-500' : k === 'T2' ? 'bg-orange-500' : 'bg-cyan-500';
+
+            return (
+                <div className="min-h-screen pb-12">
+                    <header className="bg-slate-900 text-white shadow-lg sticky top-0 z-30">
+                        <div className="max-w-7xl mx-auto px-4 py-4 flex flex-col lg:flex-row justify-between items-center gap-4">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2 bg-rose-600 rounded-lg"><Icons.Truck /></div>
+                                <div><h1 className="text-xl font-bold flex items-center gap-2">Matriz de Cumplimiento {isLoading && <span className="loader"></span>}</h1><p className="text-xs text-slate-400">Norte · Van · Extensión · Camiones · Sur — datos en vivo del Dashboard de Transporte</p></div>
+                            </div>
+                            <div className="flex gap-3 items-center flex-wrap justify-center">
+                                <div className="flex items-center bg-slate-800 border border-slate-700 rounded overflow-hidden text-sm">
+                                    <a href="index.html" title="Inicio" className="px-2.5 py-1.5 text-slate-300 hover:bg-slate-700 border-r border-slate-700 flex items-center"><Icons.Home /></a>
+                                    <span className="px-3 py-1.5 bg-rose-600 text-white flex items-center gap-1.5"><Icons.Table />Matriz</span>
+                                    <a href="Flota_Stellantis.html" className="px-3 py-1.5 text-slate-300 hover:bg-slate-700 flex items-center gap-1.5"><Icons.Truck />Flota</a>
+                                </div>
+                                <div className="flex items-center bg-slate-800 border border-slate-700 rounded overflow-hidden text-sm">
+                                    <button onClick={() => setSelectedDate(d => isoAddDays(d, -1))} className="px-2 py-1.5 hover:bg-slate-700"><Icons.ChevronLeft /></button>
+                                    <div className="flex items-center gap-1.5 px-1"><span className="text-slate-400"><Icons.Calendar /></span>
+                                        <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} className="bg-slate-800 text-white text-sm px-1 py-1.5 outline-none" />
+                                    </div>
+                                    <button onClick={() => setSelectedDate(d => isoAddDays(d, 1))} className="px-2 py-1.5 hover:bg-slate-700"><Icons.ChevronRight /></button>
+                                </div>
+                                <button onClick={() => setSelectedDate(todayISO())} className="bg-slate-800 border border-slate-700 hover:bg-slate-700 px-3 py-1.5 rounded text-sm text-slate-300">Hoy</button>
+                                <select className="bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm" value={selectedPlant} onChange={e => setSelectedPlant(e.target.value)}>
+                                    {PLANTS.map(p => <option key={p} value={p}>{p === 'Todas' ? 'Todas las áreas' : p}</option>)}
+                                </select>
+                            </div>
+                        </div>
+                    </header>
+
+                    <main className="max-w-7xl mx-auto px-4 py-8 space-y-8">
+                        <div className="flex items-center justify-between flex-wrap gap-2">
+                            <h2 className="text-lg font-bold text-slate-700">{isoLongLabel(selectedDate)}</h2>
+                            {loadError && <span className="text-xs bg-amber-50 text-amber-700 border border-amber-200 px-3 py-1.5 rounded-full">No fue posible conectar con la base de datos en vivo — verifica tu conexión.</span>}
+                        </div>
+
+                        {/* KPIs DEL DÍA */}
+                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                            <StatCard title="Arranques fuera de tiempo" value={dayStats.arranques} icon={Icons.Clock} color="#0284c7" />
+                            <StatCard title="Llegadas fuera de tiempo" value={dayStats.llegadas} icon={Icons.AlertOctagon} color="#e11d48" />
+                            <StatCard title="Percances del día" value={dayStats.accidents} icon={Icons.AlertOctagon} color="#ea580c" />
+                            <StatCard title="Cruces área-turno sin novedad" value={dayStats.cumplimiento} suffix="%" icon={Icons.CheckCircle} color="#10b981" />
+                        </div>
+
+                        {/* LEYENDA DE ÁREAS */}
+                        <div className="flex flex-wrap gap-3 bg-white border border-slate-200 rounded-xl p-3 text-xs">
+                            {AREA_ROWS.map(a => (
+                                <span key={a.code} className="flex items-center gap-1.5 text-slate-600"><span className="w-2.5 h-2.5 rounded-full inline-block" style={{ backgroundColor: a.color }}></span><b>{a.code}</b> = {a.plant}</span>
+                            ))}
+                        </div>
+
+                        {/* MATRIZ */}
+                        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 sm:p-6">
+                            <h3 className="font-bold mb-4 flex gap-2 items-center"><span className="text-slate-500"><Icons.Table /></span> Matriz diaria por área y turno</h3>
+                            <div className="overflow-x-auto">
+                                <table className="matrix-tbl w-full text-xs border-collapse min-w-[900px]">
+                                    <thead>
+                                        <tr>
+                                            <th rowSpan="2" className="bg-slate-800 text-white p-2 sticky left-0 z-10">Área</th>
+                                            {SHIFTS.map(sh => <th key={sh.key} colSpan="2" className={`p-2 font-bold ${sh.head}`}>{sh.label}</th>)}
+                                            <th colSpan="3" className="bg-slate-900 text-white p-2 font-bold tracking-wider">ACCIDENTES Y FALLAS MEC.</th>
+                                        </tr>
+                                        <tr>
+                                            {SHIFTS.map(sh => (
+                                                <React.Fragment key={sh.key}>
+                                                    <th className="bg-white p-1.5 font-semibold text-slate-500"><span className="flex items-center justify-center gap-1 text-sky-600"><Icons.ArrowUpRight />Arranques<br />fuera tiempo</span></th>
+                                                    <th className="bg-white p-1.5 font-semibold text-slate-500"><span className="flex items-center justify-center gap-1 text-rose-500"><Icons.ArrowDownRight />Llegadas<br />fuera de tiempo</span></th>
+                                                </React.Fragment>
+                                            ))}
+                                            {ACC_COLS.map(c => <th key={c.key} className={`${c.head} text-white p-2 font-bold`}>{c.key}</th>)}
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {matrix.rows.map(r => (
+                                            <tr key={r.area.code}>
+                                                <td className="p-2 font-bold text-slate-700 bg-slate-50 sticky left-0 z-10">
+                                                    <div className="flex items-center gap-2"><span className="w-2.5 h-2.5 rounded-full inline-block" style={{ backgroundColor: r.area.color }}></span>{r.area.code}</div>
+                                                </td>
+                                                {r.shiftsData.map(sd => {
+                                                    const shDef = SHIFTS.find(s => s.key === sd.key);
+                                                    return (
+                                                        <React.Fragment key={sd.key}>
+                                                            <MatrixCell value={sd.arranques} onClick={() => openArranquesDetail(r.area, shDef)} />
+                                                            <MatrixCell value={sd.llegadas} onClick={() => openLlegadasDetail(r.area, shDef)} />
+                                                        </React.Fragment>
+                                                    );
+                                                })}
+                                                {ACC_COLS.map(c => <MatrixCell key={c.key} value={r.acc[c.key]} onClick={() => openAccDetail(r.area, c)} />)}
+                                            </tr>
+                                        ))}
+                                        <tr className="font-bold">
+                                            <td className="p-2 bg-slate-800 text-white sticky left-0 z-10">Total</td>
+                                            {matrix.totals.shifts.map(t => (
+                                                <React.Fragment key={t.key}>
+                                                    <td className="p-0 text-center bg-slate-100"><button onClick={() => openTotalsDetail('arranques', t.key)} className="cell-btn w-full h-full py-2.5 text-slate-800">{t.arranques}</button></td>
+                                                    <td className="p-0 text-center bg-slate-100"><button onClick={() => openTotalsDetail('llegadas', t.key)} className="cell-btn w-full h-full py-2.5 text-slate-800">{t.llegadas}</button></td>
+                                                </React.Fragment>
+                                            ))}
+                                            {ACC_COLS.map(c => <td key={c.key} className="p-0 text-center bg-slate-100"><button onClick={() => openTotalsDetail('acc', c.key)} className="cell-btn w-full h-full py-2.5 text-slate-800">{matrix.totals.acc[c.key]}</button></td>)}
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <p className="text-[11px] text-slate-400 mt-3 flex items-center gap-1.5"><Icons.Info /> Haz clic en cualquier celda para ver el detalle de las incidencias que la componen. Celdas en verde = sin novedad, en rosa = con incidencias.</p>
+                            <p className="text-[11px] text-slate-400 mt-1 flex items-center gap-1.5"><Icons.AlertOctagon /> A = Accidente grave · B = Accidente moderado · C = Falla mecánica.</p>
+                        </div>
+
+                        {/* TENDENCIAS 7 DÍAS */}
+                        <div>
+                            <h3 className="text-lg font-bold text-slate-700 mb-4 flex items-center gap-2"><span className="bg-slate-200 p-1 rounded"><Icons.BarChart2 /></span> Tendencias — últimos 7 días al {selectedDate.split('-').reverse().join('/')}</h3>
+                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
+                                <TrendLine title="Arranques fuera de tiempo" data={trend.days} dataKey="arranques" color="#0284c7" icon={Icons.Clock} />
+                                <TrendLine title="Llegadas fuera de tiempo" data={trend.days} dataKey="llegadas" color="#e11d48" icon={Icons.AlertOctagon} />
+                                <ShiftBarChart data={trend.shiftTotals} />
+                                <TrendLine title="Percances" data={trend.days} dataKey="accidents" color="#ea580c" icon={Icons.AlertOctagon} highlightMaxDay={true} />
+                            </div>
+                        </div>
+
+                        {/* DETALLE DE INCIDENCIAS DEL DÍA */}
+                        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                            <div className="p-4 bg-slate-50 font-bold border-b flex justify-between items-center">
+                                <span className="flex gap-2 items-center"><span className="text-rose-500"><Icons.Layers /></span> Detalle de incidencias — {selectedPlant === 'Todas' ? 'todas las áreas' : selectedPlant}</span>
+                                <span className="text-xs bg-rose-100 text-rose-700 px-2 py-1 rounded-full">{detailTable.length}</span>
+                            </div>
+                            <div className="max-h-72 overflow-y-auto">
+                                <table className="w-full text-sm text-left">
+                                    <thead className="sticky top-0 bg-slate-50 text-slate-500 shadow-sm z-10">
+                                        <tr>
+                                            <th className="p-3">Área</th><th className="p-3">Turno</th>
+                                            <th className="p-3 text-center bg-sky-50 text-sky-600">Arranques</th>
+                                            <th className="p-3 text-center bg-rose-50 text-rose-600">Llegadas</th>
+                                            <th className="p-3 text-center bg-orange-50 text-orange-600">Percances</th>
+                                            <th className="p-3 text-center">N.S.</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y">
+                                        {detailTable.length === 0 && <tr><td colSpan="6" className="p-6 text-center text-slate-400">Sin registros para este día / área.</td></tr>}
+                                        {detailTable.map(inc => (
+                                            <tr key={inc.id} className="hover:bg-slate-50">
+                                                <td className="p-3 font-medium text-slate-700">{inc.plant}</td>
+                                                <td className="p-3"><span className="flex items-center gap-1.5"><span className={`w-2 h-2 rounded-full inline-block ${shiftDot(inc.shift)}`}></span>{inc.shift}</span></td>
+                                                <td className="p-3 text-center font-bold text-sky-600">{(inc.lateStarts || 0) + (inc.lateStartsNoAff || 0)}</td>
+                                                <td className="p-3 text-center font-bold text-rose-600">{(inc.imp || 0) + (inc.noImp || 0)}</td>
+                                                <td className="p-3 text-center font-bold text-orange-600">{inc.accidents || 0}</td>
+                                                <td className="p-3 text-center font-bold text-emerald-600">{(() => { const sl = serviceLevelFor(inc.date, inc.plant); const v = sl != null ? sl : inc.serviceLevel; return v != null ? v + '%' : '-'; })()}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </main>
+
+                    <DetailModal info={detailInfo} onClose={() => setDetailInfo(null)} />
+                </div>
+            );
+        };
+
+        const root = createRoot(document.getElementById('root'));
+        root.render(<MatrixDashboard />);
+    </script>
+</body>
+</html>
