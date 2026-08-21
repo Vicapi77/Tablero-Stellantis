@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stellantis - Tableros</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #f8fafc; font-family: system-ui, -apple-system, sans-serif; }
+        .card-hover { transition: transform .15s ease, box-shadow .15s ease; }
+        .card-hover:hover { transform: translateY(-3px); box-shadow: 0 12px 24px -8px rgba(15, 23, 42, 0.18); }
+    </style>
+</head>
+<body>
+    <header class="bg-slate-900 text-white shadow-lg">
+        <div class="max-w-5xl mx-auto px-4 py-5 flex items-center gap-3">
+            <div class="p-2 bg-rose-600 rounded-lg">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="16" height="13" x="1" y="5" rx="2" /><polygon points="16 8 20 8 23 11 23 16 16 16 16 8" /><circle cx="5.5" cy="18.5" r="2.5" /><circle cx="18.5" cy="18.5" r="2.5" /></svg>
+            </div>
+            <div>
+                <h1 class="text-xl font-bold">Tableros Stellantis</h1>
+                <p class="text-xs text-slate-400">Norte · Van · Extensión · Camiones · Sur</p>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-5xl mx-auto px-4 py-12">
+        <div class="mb-8">
+            <h2 class="text-lg font-bold text-slate-700">Selecciona un tablero</h2>
+            <p class="text-sm text-slate-500 mt-1">Ambos se conectan en vivo a la misma base de datos.</p>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+            <a href="Matriz_Cumplimiento_Transporte.html" class="card-hover bg-white rounded-2xl border border-slate-200 shadow-sm p-6 flex flex-col gap-4 no-underline">
+                <div class="w-12 h-12 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h18v18H3z"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M9 3v18"/></svg>
+                </div>
+                <div>
+                    <h3 class="text-lg font-bold text-slate-800">Matriz de Cumplimiento</h3>
+                    <p class="text-sm text-slate-500 mt-1.5 leading-relaxed">Arranques y llegadas fuera de tiempo, accidentes A/B/C por área y turno, con drill-down por celda y tendencias de 7 días.</p>
+                </div>
+                <span class="mt-auto inline-flex items-center gap-1.5 text-sm font-bold text-rose-600">
+                    Abrir tablero
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+                </span>
+            </a>
+
+            <a href="Flota_Stellantis.html" class="card-hover bg-white rounded-2xl border border-slate-200 shadow-sm p-6 flex flex-col gap-4 no-underline">
+                <div class="w-12 h-12 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="16" height="13" x="1" y="5" rx="2" /><polygon points="16 8 20 8 23 11 23 16 16 16 16 8" /><circle cx="5.5" cy="18.5" r="2.5" /><circle cx="18.5" cy="18.5" r="2.5" /></svg>
+                </div>
+                <div>
+                    <h3 class="text-lg font-bold text-slate-800">Flota Stellantis</h3>
+                    <p class="text-sm text-slate-500 mt-1.5 leading-relaxed">203 unidades: condición mecánica, calificación Mecanix, listado por planta y documentos (póliza y tarjeta de circulación) por unidad.</p>
+                </div>
+                <span class="mt-auto inline-flex items-center gap-1.5 text-sm font-bold text-rose-600">
+                    Abrir tablero
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+                </span>
+            </a>
+        </div>
+    </main>
+</body>
+</html>
