@@ -291,7 +291,9 @@
                     const areaIncidents = dayIncidents.filter(i => i.plant === area.plant);
                     const shiftsData = SHIFTS.map(sh => {
                         const list = areaIncidents.filter(i => i.shift === sh.key);
-                        const arranques = list.reduce((s, i) => s + (i.lateStarts || 0) + (i.lateStartsNoAff || 0), 0);
+                        // Solo se suman los arranques CON afectación; "sin afectación" se sigue capturando
+                        // y se puede ver desglosado dentro del detalle, pero ya no infla este total.
+                        const arranques = list.reduce((s, i) => s + (i.lateStarts || 0), 0);
                         const llegadas = list.reduce((s, i) => s + (i.imp || 0) + (i.noImp || 0), 0);
                         return { key: sh.key, arranques, llegadas, list };
                     });
@@ -331,13 +333,13 @@
                     const iso = isoAddDays(selectedDate, off);
                     const dmy = isoToDMY(iso);
                     const list = incidents.filter(i => i.date === dmy && (selectedPlant === 'Todas' || i.plant === selectedPlant));
-                    const arranques = list.reduce((s, i) => s + (i.lateStarts || 0) + (i.lateStartsNoAff || 0), 0);
+                    const arranques = list.reduce((s, i) => s + (i.lateStarts || 0), 0);
                     const llegadas = list.reduce((s, i) => s + (i.imp || 0) + (i.noImp || 0), 0);
                     const accidents = list.reduce((s, i) => s + (i.accidents || 0), 0);
                     const byShift = { T1: 0, T2: 0, T3: 0 };
                     SHIFTS.forEach(sh => {
                         const sl = list.filter(i => i.shift === sh.key);
-                        byShift[sh.key] = sl.reduce((s, i) => s + (i.lateStarts || 0) + (i.lateStartsNoAff || 0) + (i.imp || 0) + (i.noImp || 0), 0);
+                        byShift[sh.key] = sl.reduce((s, i) => s + (i.lateStarts || 0) + (i.imp || 0) + (i.noImp || 0), 0);
                     });
                     days.push({ date: dmy, dayName: isoWeekdayShort(iso), arranques, llegadas, accidents, byShift });
                 }
@@ -353,7 +355,7 @@
 
             const dayStats = useMemo(() => {
                 const list = matrix.dayIncidents;
-                const arranques = list.reduce((s, i) => s + (i.lateStarts || 0) + (i.lateStartsNoAff || 0), 0);
+                const arranques = list.reduce((s, i) => s + (i.lateStarts || 0), 0);
                 const llegadas = list.reduce((s, i) => s + (i.imp || 0) + (i.noImp || 0), 0);
                 const accidents = list.reduce((s, i) => s + (i.accidents || 0), 0);
                 const cruces = AREA_ROWS.length * SHIFTS.length;
@@ -503,11 +505,28 @@
                     return;
                 }
                 const sh = SHIFTS.find(s => s.key === shKey);
+
+                if (type === 'llegadas') {
+                    const allList = matrix.rows.flatMap(r => r.shiftsData.find(s => s.key === shKey).list);
+                    const impList = causeSummary(allList, CAUSE_LABELS_IMP);
+                    const noImpList = causeSummary(allList, CAUSE_LABELS_NOIMP);
+                    setDetailInfo({
+                        title: `Total Llegadas fuera de tiempo — Todas las áreas`,
+                        subtitle: `${sh.label} · ${isoLongLabel(selectedDate)}`,
+                        note: (impList.length > 0 || noImpList.length > 0) ? (
+                            'Principales causas: ' + [...impList, ...noImpList].map(c => `${c.label} (${c.val})`).join(', ')
+                        ) : null,
+                        columns: ['Área', 'Llegadas'],
+                        rows: matrix.rows.map(r => [`${r.area.code} (${r.area.plant})`, r.shiftsData.find(s => s.key === shKey).llegadas]).filter(r => r[1] > 0)
+                    });
+                    return;
+                }
+
                 setDetailInfo({
-                    title: `Total ${type === 'arranques' ? 'Arranques' : 'Llegadas'} fuera de tiempo — Todas las áreas`,
+                    title: `Total Arranques fuera de tiempo — Todas las áreas`,
                     subtitle: `${sh.label} · ${isoLongLabel(selectedDate)}`,
-                    columns: ['Área', type === 'arranques' ? 'Arranques' : 'Llegadas'],
-                    rows: matrix.rows.map(r => [`${r.area.code} (${r.area.plant})`, r.shiftsData.find(s => s.key === shKey)[type === 'arranques' ? 'arranques' : 'llegadas']]).filter(r => r[1] > 0)
+                    columns: ['Área', 'Arranques'],
+                    rows: matrix.rows.map(r => [`${r.area.code} (${r.area.plant})`, r.shiftsData.find(s => s.key === shKey).arranques]).filter(r => r[1] > 0)
                 });
             };
 
@@ -653,7 +672,7 @@
                                             <tr key={inc.id} className="hover:bg-slate-50">
                                                 <td className="p-3 font-medium text-slate-700">{inc.plant}</td>
                                                 <td className="p-3"><span className="flex items-center gap-1.5"><span className={`w-2 h-2 rounded-full inline-block ${shiftDot(inc.shift)}`}></span>{inc.shift}</span></td>
-                                                <td className="p-3 text-center font-bold text-sky-600">{(inc.lateStarts || 0) + (inc.lateStartsNoAff || 0)}</td>
+                                                <td className="p-3 text-center font-bold text-sky-600">{inc.lateStarts || 0}</td>
                                                 <td className="p-3 text-center font-bold text-rose-600">{(inc.imp || 0) + (inc.noImp || 0)}</td>
                                                 <td className="p-3 text-center font-bold text-orange-600">{inc.accidents || 0}</td>
                                                 <td className="p-3 text-center font-bold text-emerald-600">{(() => { const sl = serviceLevelFor(inc.date, inc.plant); const v = sl != null ? sl : inc.serviceLevel; return v != null ? v + '%' : '-'; })()}</td>
