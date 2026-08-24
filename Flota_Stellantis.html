@@ -203,15 +203,15 @@
         const fmtDate = d => { if (!d) return '—'; const [y, m, day] = d.split('-'); return `${day}/${m}/${y}`; };
 
         // --- MINI GRÁFICOS ---
-        const BarChartOrdinal = ({ data, color = '#e11d48', height = 150 }) => {
+        const BarChartOrdinal = ({ data, color = '#e11d48', height = 150, onBarClick }) => {
             const max = Math.max(...data.map(d => d.val), 1);
             const [hover, setHover] = useState(null);
             return (
                 <div className="w-full flex items-end justify-between gap-1" style={{ height: `${height}px` }}>
                     {data.map((d, i) => (
-                        <div key={i} className="flex-1 flex flex-col items-center h-full justify-end group" onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}>
+                        <div key={i} className={`flex-1 flex flex-col items-center h-full justify-end group ${onBarClick ? 'cursor-pointer' : ''}`} onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)} onClick={() => onBarClick && onBarClick(d)} title={onBarClick ? 'Ver detalle de estas unidades' : undefined}>
                             <span className={`text-[10px] font-bold text-slate-600 mb-1 transition-opacity ${hover === i || d.val === max ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>{d.val}</span>
-                            <div className="w-full max-w-[26px] rounded-t-[4px]" style={{ height: `${Math.max(4, (d.val / max) * 100)}%`, backgroundColor: color, opacity: hover === null || hover === i ? 1 : 0.45 }}></div>
+                            <div className="w-full max-w-[26px] rounded-t-[4px] transition-transform" style={{ height: `${Math.max(4, (d.val / max) * 100)}%`, backgroundColor: color, opacity: hover === null || hover === i ? 1 : 0.45, transform: onBarClick && hover === i ? 'scaleX(1.15)' : 'none' }}></div>
                             <span className="mt-1.5 text-[9px] text-slate-400 font-medium">{d.label}</span>
                         </div>
                     ))}
@@ -250,18 +250,55 @@
             );
         };
 
-        const PlantScoreBars = ({ data }) => {
+        const PlantScoreBars = ({ data, onBarClick }) => {
             const [hover, setHover] = useState(null);
             return (
                 <div className="w-full flex items-end justify-around gap-3" style={{ height: '170px' }}>
                     {data.map((d, i) => (
-                        <div key={d.key} className="flex-1 flex flex-col items-center h-full justify-end" onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}>
+                        <div key={d.key} className={`flex-1 flex flex-col items-center h-full justify-end ${onBarClick ? 'cursor-pointer' : ''}`} onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)} onClick={() => onBarClick && onBarClick(d)} title={onBarClick ? 'Ver detalle de estas unidades' : undefined}>
                             <span className="text-xs font-extrabold text-slate-700 mb-1">{d.score !== null ? (d.score * 100).toFixed(1) + '%' : '—'}</span>
-                            <div className="w-full max-w-[40px] rounded-t-[4px]" style={{ height: `${d.score !== null ? Math.max(6, ((d.score - 0.7) / 0.3) * 100) : 4}%`, backgroundColor: d.color, opacity: hover === null || hover === i ? 1 : 0.5 }}></div>
+                            <div className="w-full max-w-[40px] rounded-t-[4px] transition-transform" style={{ height: `${d.score !== null ? Math.max(6, ((d.score - 0.7) / 0.3) * 100) : 4}%`, backgroundColor: d.color, opacity: hover === null || hover === i ? 1 : 0.5, transform: onBarClick && hover === i ? 'scaleX(1.1)' : 'none' }}></div>
                             <span className="mt-2 text-[10px] font-bold text-slate-600 text-center">{d.code}</span>
                             <span className="text-[9px] text-slate-400">{d.n} un.</span>
                         </div>
                     ))}
+                </div>
+            );
+        };
+
+        // --- CUADRO DE DETALLE AL PICARLE A UNA BARRA DE LOS GRÁFICOS ---
+        const ChartDetailModal = ({ info, onOpenVehicle, onClose }) => {
+            if (!info) return null;
+            return (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={onClose}>
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col fade-in" onClick={e => e.stopPropagation()}>
+                        <div className="bg-slate-900 p-4 flex justify-between items-start text-white rounded-t-2xl">
+                            <div><h2 className="font-bold text-base">{info.title}</h2><p className="text-xs text-slate-400 mt-0.5">{info.vehicles.length} unidad{info.vehicles.length === 1 ? '' : 'es'}</p></div>
+                            <button onClick={onClose} className="text-slate-300 hover:text-white"><Icons.X /></button>
+                        </div>
+                        <div className="overflow-y-auto">
+                            {info.vehicles.length === 0 ? (
+                                <div className="text-center text-slate-400 text-sm py-10">Sin unidades para este dato.</div>
+                            ) : (
+                                <table className="w-full text-sm text-left">
+                                    <thead className="sticky top-0 bg-slate-50 text-slate-500 text-xs">
+                                        <tr><th className="p-3">ID</th><th className="p-3">Placas</th><th className="p-3">Modelo</th><th className="p-3 text-center">{info.metricLabel}</th></tr>
+                                    </thead>
+                                    <tbody className="divide-y">
+                                        {info.vehicles.map(v => (
+                                            <tr key={v.vehicleId} className="hover:bg-slate-50 cursor-pointer" onClick={() => onOpenVehicle(v)}>
+                                                <td className="p-3 font-bold text-slate-700">{v.vehicleId}</td>
+                                                <td className="p-3 text-slate-600">{v.plate || '—'}</td>
+                                                <td className="p-3 text-slate-500">{v.year}</td>
+                                                <td className="p-3 text-center">{info.metricGet(v)}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            )}
+                        </div>
+                        <p className="text-[11px] text-slate-400 p-3 border-t flex items-center gap-1.5"><Icons.Info /> Haz clic en una unidad para ver su detalle completo.</p>
+                    </div>
                 </div>
             );
         };
@@ -756,6 +793,7 @@
             const [plantFilter, setPlantFilter] = useState('Todas');
             const [modalVehicle, setModalVehicle] = useState(null);
             const [showNewModal, setShowNewModal] = useState(false);
+            const [chartDetail, setChartDetail] = useState(null);
             const [isAdmin, setIsAdmin] = useState(false);
             const [showLogin, setShowLogin] = useState(false);
             const [passwordInput, setPasswordInput] = useState('');
@@ -918,10 +956,12 @@
                 const typeColors = { 'Camion': '#e11d48', 'Camioneta': '#0ea5e9' };
                 const typeData = Object.keys(byType).map(t => ({ label: t === 'Camion' ? 'Camión' : t, val: byType[t], color: typeColors[t] || '#94a3b8' }));
 
+                // Evaluación promedio por planta según los criterios de FleetCheck (0-100, ponderado por categoría),
+                // no Mecanix. Solo cuentan las unidades con al menos un punto revisado (fcInfoByVehicle[id].revisado > 0).
                 const plantScoreData = PLANT_ORDER.map(p => {
                     const pl = list.filter(v => v.plant === p);
-                    const ev = pl.filter(v => v.mecanix !== null && v.mecanix !== undefined);
-                    const score = ev.length > 0 ? ev.reduce((s, v) => s + v.mecanix, 0) / ev.length : null;
+                    const ev = pl.filter(v => { const info = fcInfoByVehicle[v.vehicleId]; return info && info.revisado > 0; });
+                    const score = ev.length > 0 ? ev.reduce((s, v) => s + fcInfoByVehicle[v.vehicleId].score, 0) / ev.length / 100 : null;
                     return { key: p, code: AREA_META[p].code, color: AREA_META[p].color, score, n: pl.length };
                 });
 
@@ -929,7 +969,29 @@
                     .sort((a, b) => (b.requiereReparacion || 0) - (a.requiereReparacion || 0) || (a.mecanix ?? 1) - (b.mecanix ?? 1)).slice(0, 5);
 
                 return { total, sinEval, avgScore, requierenRep, avgAge, yearData, noCumpleYearData, noCumpleTotal, bucketData, typeData, plantScoreData, topAttention };
-            }, [filteredVehicles]);
+            }, [filteredVehicles, fcInfoByVehicle]);
+
+            // --- Detalle al picarle a una barra de los gráficos ---
+            const openYearBarDetail = (bar, onlyLabel) => {
+                const year = parseInt(bar.label);
+                setChartDetail({
+                    title: `${onlyLabel || 'Unidades'} — Modelo ${bar.label}`,
+                    vehicles: filteredVehicles.filter(v => v.year === year),
+                    metricLabel: 'Planta',
+                    metricGet: v => AREA_META[v.plant] ? AREA_META[v.plant].code : v.plant
+                });
+            };
+
+            const openPlantEvalDetail = (bar) => {
+                setChartDetail({
+                    title: `Evaluación FleetCheck — ${bar.code} (${AREA_META[bar.key].label})`,
+                    vehicles: filteredVehicles.filter(v => v.plant === bar.key),
+                    metricLabel: '% Evaluación',
+                    metricGet: v => { const info = fcInfoByVehicle[v.vehicleId]; return info && info.revisado > 0 ? info.score + '%' : (info ? 'Sin revisar' : 'Sin FleetCheck'); }
+                });
+            };
+
+            const openVehicleFromChart = (v) => { setChartDetail(null); setModalVehicle(v); };
 
             const grouped = useMemo(() => {
                 const g = {}; PLANT_ORDER.forEach(p => g[p] = []);
@@ -953,7 +1015,6 @@
                                     <a href="index.html" title="Inicio" className="px-2.5 py-1.5 text-slate-300 hover:bg-slate-700 border-r border-slate-700 flex items-center"><Icons.Home /></a>
                                     <a href="Matriz_Cumplimiento_Transporte.html" className="px-3 py-1.5 text-slate-300 hover:bg-slate-700 flex items-center gap-1.5"><Icons.Table />Matriz</a>
                                     <span className="px-3 py-1.5 bg-rose-600 text-white flex items-center gap-1.5"><Icons.Truck />Flota</span>
-                                    <a href="inspeccion_unidades_stellantis.html" className="px-3 py-1.5 text-slate-300 hover:bg-slate-700 flex items-center gap-1.5 border-l border-slate-700" title="Ir al dashboard de Inspección de Unidades"><Icons.CheckCircle />Inspección</a>
                                 </div>
                                 <div className="relative"><span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500"><Icons.Search /></span><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar ID o placa..." className="bg-slate-800 border border-slate-700 rounded pl-8 pr-3 py-1.5 text-sm w-44 outline-none focus:border-rose-500" /></div>
                                 <select className="bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm" value={plantFilter} onChange={e => setPlantFilter(e.target.value)}>
@@ -1012,7 +1073,7 @@
                             <div className="grid grid-cols-1 xl:grid-cols-4 gap-5">
                                 <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
                                     <h5 className="text-xs font-bold text-slate-600 mb-3 uppercase tracking-wider">Unidades por Modelo (Año)</h5>
-                                    <BarChartOrdinal data={stats.yearData} color="#1e293b" />
+                                    <BarChartOrdinal data={stats.yearData} color="#1e293b" onBarClick={bar => openYearBarDetail(bar, 'Unidades')} />
                                 </div>
                                 <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
                                     <h5 className="text-xs font-bold text-slate-600 mb-3 uppercase tracking-wider flex items-center justify-between">
@@ -1020,7 +1081,7 @@
                                         <span className="text-[10px] bg-rose-100 text-rose-600 px-2 py-0.5 rounded-full normal-case font-bold">{stats.noCumpleTotal}</span>
                                     </h5>
                                     {stats.noCumpleYearData.length > 0
-                                        ? <BarChartOrdinal data={stats.noCumpleYearData} color="#e11d48" />
+                                        ? <BarChartOrdinal data={stats.noCumpleYearData} color="#e11d48" onBarClick={bar => openYearBarDetail(bar, 'No cumplen')} />
                                         : <div className="h-[150px] flex items-center justify-center text-slate-300 text-xs text-center px-4">Todas las unidades cumplen (modelo {NO_CUMPLE_YEAR_MAX + 1}+)</div>}
                                     <p className="text-[10px] text-slate-400 mt-2">No cumplen: modelo {NO_CUMPLE_YEAR_MAX} o anterior.</p>
                                 </div>
@@ -1028,8 +1089,8 @@
                                     <DonutChart title="Calificación Mecanix" data={stats.bucketData} />
                                 </div>
                                 <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                                    <h5 className="text-xs font-bold text-slate-600 mb-3 uppercase tracking-wider">Score promedio por Planta</h5>
-                                    <PlantScoreBars data={stats.plantScoreData} />
+                                    <h5 className="text-xs font-bold text-slate-600 mb-3 uppercase tracking-wider">Evaluación Promedio por Planta (FleetCheck)</h5>
+                                    <PlantScoreBars data={stats.plantScoreData} onBarClick={openPlantEvalDetail} />
                                 </div>
                             </div>
                         </div>
@@ -1077,6 +1138,8 @@
                             </div>
                         </div>
                     </main>
+
+                    <ChartDetailModal info={chartDetail} onOpenVehicle={openVehicleFromChart} onClose={() => setChartDetail(null)} />
 
                     {modalVehicle && (
                         <VehicleModal vehicle={modalVehicle} isAdmin={isAdmin} isNew={false}
