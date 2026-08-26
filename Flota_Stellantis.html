@@ -113,7 +113,7 @@
             { min: 90, label: 'Aceptable', color: '#84cc16' },
             { min: 80, label: 'Condicionada', color: '#f0a500' },
             { min: 70, label: 'Deficiente', color: '#f97316' },
-            { min: 0, label: 'Crítico', color: '#f87171' },
+            { min: 0, label: 'Inoperable', color: '#f87171' },
         ];
         const fcClassify = (score) => FC_TIERS.find(t => score >= t.min) || FC_TIERS[FC_TIERS.length - 1];
         const fcGetItem = (checklist, unidadId, apartadoId) => checklist[unidadId + '_' + apartadoId] || {};
@@ -646,6 +646,7 @@
             if (showPlant) cols.push({ key: 'plant', label: 'Planta', get: v => AREA_META[v.plant] ? AREA_META[v.plant].label : (v.plant || '') });
             cols.push({ key: 'mecanix', label: 'Mecanix', get: v => v.mecanix === null || v.mecanix === undefined ? -1 : v.mecanix, center: true });
             cols.push({ key: 'fcScore', label: '% Eval.', get: (v, fcMap) => { const info = fcMap[v.vehicleId]; return info && info.revisado ? info.score : -1; }, center: true });
+            cols.push({ key: 'fcTier', label: 'Criterio', get: (v, fcMap) => { const info = fcMap[v.vehicleId]; return info && info.revisado ? info.tier.label : (info ? 'Sin revisar' : 'Sin FleetCheck'); }, center: true });
             cols.push({ key: 'ultimoPreventivo', label: 'Últ. Preventivo', get: v => v.ultimoPreventivo || '' });
             return cols;
         };
@@ -696,6 +697,13 @@
                                         {info
                                             ? (info.revisado
                                                 ? <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: info.tier.color + '1a', color: info.tier.color }} title={info.tier.label}>{info.score}%</span>
+                                                : <span className="text-xs text-slate-400">Sin revisar</span>)
+                                            : <span className="text-xs text-slate-300">—</span>}
+                                    </td>
+                                    <td className="p-3 text-center">
+                                        {info
+                                            ? (info.revisado
+                                                ? <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: info.tier.color + '1a', color: info.tier.color }}>{info.tier.label}</span>
                                                 : <span className="text-xs text-slate-400">Sin revisar</span>)
                                             : <span className="text-xs text-slate-300">—</span>}
                                     </td>
