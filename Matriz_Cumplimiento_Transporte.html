@@ -61,6 +61,7 @@
             CheckCircle: () => <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>,
             Users: () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>,
             Download: () => <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>,
+            Wrench: () => <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>,
         };
 
         // --- FIREBASE (misma base de datos que el dashboard operativo) ---
@@ -90,10 +91,13 @@
         ];
         const PLANTS = ['Todas', 'Camiones', 'Extensión', 'Van', 'Norte', 'Sur'];
         const SHIFTS = [
-            { key: 'T1', label: '1er turno', head: 'bg-sky-100 text-sky-800 border-sky-200' },
-            { key: 'T2', label: '2do turno', head: 'bg-orange-100 text-orange-800 border-orange-200' },
-            { key: 'T3', label: '3er turno', head: 'bg-cyan-100 text-cyan-800 border-cyan-200' },
+            { key: 'T1', label: '1er turno', head: 'bg-sky-100 text-sky-800 border-sky-200', type: 'fijo' },
+            { key: 'MM', label: 'Mixto de Mañana', head: 'bg-indigo-100 text-indigo-800 border-indigo-200', type: 'mixto' },
+            { key: 'T2', label: '2do turno', head: 'bg-orange-100 text-orange-800 border-orange-200', type: 'fijo' },
+            { key: 'MT', label: 'Mixto de Tarde', head: 'bg-fuchsia-100 text-fuchsia-800 border-fuchsia-200', type: 'mixto' },
+            { key: 'T3', label: '3er turno', head: 'bg-cyan-100 text-cyan-800 border-cyan-200', type: 'fijo' },
         ];
+        const SHIFT_TYPE_FILTERS = ['Todos', 'Fijos', 'Mixtos'];
         const ACC_COLS = [
             { key: 'A', label: 'A', head: 'bg-red-600', name: 'Accidente Grave' },
             { key: 'B', label: 'B', head: 'bg-orange-500', name: 'Accidente Moderado' },
@@ -133,68 +137,94 @@
             return s.charAt(0).toUpperCase() + s.slice(1);
         };
         const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
+        // Lunes = 1 ... Domingo = 7
+        const isoWeekdayNum = iso => { const { y, m, d } = isoToParts(iso); const wd = new Date(Date.UTC(y, m - 1, d)).getUTCDay(); return wd === 0 ? 7 : wd; };
+        const isoWeekStart = iso => isoAddDays(iso, -(isoWeekdayNum(iso) - 1));
+        const isoShortDayMonth = iso => { const { y, m, d } = isoToParts(iso); const s = new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('es-ES', { day: '2-digit', month: 'short', timeZone: 'UTC' }); return s.replace('.', ''); };
+        const isoDaysInMonth = iso => { const { y, m } = isoToParts(iso); return new Date(Date.UTC(y, m, 0)).getUTCDate(); };
+        const isoMonthLabel = iso => { const { y, m } = isoToParts(iso); const s = new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString('es-ES', { month: 'long', year: 'numeric', timeZone: 'UTC' }); return s.charAt(0).toUpperCase() + s.slice(1); };
 
-        // --- MINI GRÁFICA DE TENDENCIA (línea, 7 puntos) ---
-        const TrendLine = ({ data, dataKey, color, title, icon: Icon, suffix = '', highlightMaxDay = false }) => {
-            const values = data.map(d => d[dataKey]);
-            const min = Math.min(...values, 0); const max = Math.max(...values, 1);
+        // --- GRÁFICA DE TENDENCIA MULTI-PLANTA (semanal o mensual, hasta 5 líneas — una por planta) ---
+        // Cuando el filtro global de planta = "Todas" dibuja una línea por cada una de las 5 plantas;
+        // si hay una sola planta seleccionada, dibuja una sola línea con el color propio de la métrica.
+        const MultiTrendLine = ({ title, icon: Icon, metricKey, days, plants, colorSingle, suffix = '', compact = false }) => {
+            const multi = plants.length > 1;
+            const series = plants.map(p => ({
+                code: p.code, color: p.color, plant: p.plant,
+                values: days.map(d => (d.perPlant[p.plant] ? d.perPlant[p.plant][metricKey] : 0) || 0)
+            }));
+            const allValues = series.flatMap(s => s.values);
+            const min = Math.min(...allValues, 0); const max = Math.max(...allValues, 1);
             const pad = (max - min) * 0.25 || 1; const domainMin = Math.max(0, min - pad); const domainMax = max + pad; const range = (domainMax - domainMin) || 1;
-            const width = 320; const height = 130; const marginX = 22; const marginY = 26;
-            const xAt = i => marginX + (i / (data.length - 1)) * (width - 2 * marginX);
+            const width = 620; const height = 170; const marginX = 24; const marginY = 28;
+            const n = days.length;
+            const xAt = i => marginX + (n <= 1 ? 0 : (i / (n - 1)) * (width - 2 * marginX));
             const yAt = v => height - marginY - ((v - domainMin) / range) * (height - 2 * marginY);
-            const points = data.map((d, i) => `${xAt(i)},${yAt(d[dataKey])}`).join(' ');
-            const areaPts = `${xAt(0)},${height - marginY} ` + points + ` ${xAt(data.length - 1)},${height - marginY}`;
-            const gid = 'grad-' + dataKey;
-            const maxIdx = values.indexOf(Math.max(...values));
-            const [hover, setHover] = useState(null);
+            const [hoverIdx, setHoverIdx] = useState(null);
+            const labelEvery = compact ? Math.max(1, Math.ceil(n / 10)) : 1;
+            const lineColor = multi ? null : colorSingle;
             return (
                 <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                    <h5 className="text-xs font-bold text-slate-600 mb-1 uppercase tracking-wider flex items-center gap-1.5">{Icon && <span style={{ color }}><Icon /></span>}{title}</h5>
-                    <p className="text-[10px] text-slate-400 mb-2">Últimos 7 días · {selectedPlantLabelGlobal}</p>
+                    <div className="flex items-center justify-between mb-1 flex-wrap gap-1.5">
+                        <h5 className="text-xs font-bold text-slate-600 uppercase tracking-wider flex items-center gap-1.5">{Icon && <span style={{ color: multi ? '#64748b' : colorSingle }}><Icon /></span>}{title}</h5>
+                        {multi && (
+                            <div className="flex items-center gap-2 flex-wrap">
+                                {series.map(s => <span key={s.code} className="flex items-center gap-1 text-[9px] font-semibold text-slate-500"><span className="w-2 h-2 rounded-full inline-block" style={{ backgroundColor: s.color }}></span>{s.code}</span>)}
+                            </div>
+                        )}
+                    </div>
+                    <p className="text-[10px] text-slate-400 mb-2">{multi ? 'Todas las áreas' : plants[0].plant}</p>
                     <div className="relative w-full flex justify-center">
                         <svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} className="overflow-visible">
-                            <defs><linearGradient id={gid} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={color} stopOpacity="0.22" /><stop offset="100%" stopColor={color} stopOpacity="0" /></linearGradient></defs>
                             {[0.25, 0.5, 0.75].map((f, i) => <line key={i} x1={marginX} x2={width - marginX} y1={marginY + f * (height - 2 * marginY)} y2={marginY + f * (height - 2 * marginY)} stroke="#f1f5f9" strokeWidth="1" />)}
-                            <polygon points={areaPts} fill={`url(#${gid})`} />
-                            <polyline points={points} fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-                            {data.map((d, i) => (
-                                <g key={i} onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)} style={{ cursor: 'pointer' }}>
-                                    <circle cx={xAt(i)} cy={yAt(d[dataKey])} r={hover === i ? 6 : (highlightMaxDay && i === maxIdx ? 5 : 4)} fill="white" stroke={color} strokeWidth={hover === i ? 3 : 2} />
-                                    <rect x={xAt(i) - 14} y={height - marginY + 6} width="28" height="12" fill="transparent" />
-                                    {(hover === i || i === data.length - 1 || (highlightMaxDay && i === maxIdx)) && <text x={xAt(i)} y={yAt(d[dataKey]) - 10} textAnchor="middle" fontSize="10.5" fill="#334155" fontWeight="700">{d[dataKey]}{suffix}</text>}
-                                    <text x={xAt(i)} y={height - marginY + 16} textAnchor="middle" fontSize="9" fill="#94a3b8">{d.dayName}</text>
-                                    <text x={xAt(i)} y={height - marginY + 26} textAnchor="middle" fontSize="8" fill="#cbd5e1">{d.date.slice(0, 5)}</text>
-                                    {hover === i && <title>{`${d.dayName} ${d.date}: ${d[dataKey]}${suffix}`}</title>}
-                                </g>
+                            {hoverIdx !== null && <line x1={xAt(hoverIdx)} x2={xAt(hoverIdx)} y1={marginY} y2={height - marginY} stroke="#cbd5e1" strokeWidth="1" strokeDasharray="3,2" />}
+                            {series.map(s => {
+                                const pts = s.values.map((v, i) => `${xAt(i)},${yAt(v)}`).join(' ');
+                                return (
+                                    <g key={s.code}>
+                                        <polyline points={pts} fill="none" stroke={lineColor || s.color} strokeWidth={multi ? 2 : 2.5} strokeLinecap="round" strokeLinejoin="round" />
+                                        {s.values.map((v, i) => (
+                                            <g key={i} onMouseEnter={() => setHoverIdx(i)} onMouseLeave={() => setHoverIdx(null)} style={{ cursor: 'pointer' }}>
+                                                <circle cx={xAt(i)} cy={yAt(v)} r={hoverIdx === i ? 5 : (compact ? 2 : 3.5)} fill="white" stroke={lineColor || s.color} strokeWidth={hoverIdx === i ? 2.5 : 1.5} />
+                                                <rect x={xAt(i) - 8} y={marginY} width="16" height={height - 2 * marginY} fill="transparent" />
+                                                <title>{`${multi ? s.code + ' · ' : ''}${days[i].dayName} ${days[i].date}: ${v}${suffix}`}</title>
+                                            </g>
+                                        ))}
+                                    </g>
+                                );
+                            })}
+                            {days.map((d, i) => (i % labelEvery === 0 || i === n - 1) && (
+                                <text key={i} x={xAt(i)} y={height - marginY + 16} textAnchor="middle" fontSize={compact ? 8 : 9.5} fill="#94a3b8">{d.dayName}</text>
                             ))}
+                            {hoverIdx !== null && (() => {
+                                const lines = [
+                                    `${days[hoverIdx].dayName} ${days[hoverIdx].date}`,
+                                    ...(multi ? series.map(s => `${s.code}: ${s.values[hoverIdx]}${suffix}`) : [`${series[0].values[hoverIdx]}${suffix}`])
+                                ];
+                                const lineH = 11;
+                                const boxW = Math.max(64, Math.max(...lines.map(l => l.length)) * 5.4 + 12);
+                                const boxH = lines.length * lineH + 8;
+                                const topY = Math.min(...series.map(s => yAt(s.values[hoverIdx])));
+                                let boxX = xAt(hoverIdx) - boxW / 2;
+                                boxX = Math.max(2, Math.min(width - boxW - 2, boxX));
+                                let boxY = topY - boxH - 9;
+                                if (boxY < 1) boxY = topY + 11;
+                                return (
+                                    <g pointerEvents="none">
+                                        <rect x={boxX} y={boxY} width={boxW} height={boxH} rx="4" fill="#1e293b" fillOpacity="0.95" />
+                                        {lines.map((l, li) => (
+                                            <text key={li} x={boxX + boxW / 2} y={boxY + 12 + li * lineH} textAnchor="middle" fontSize={li === 0 ? 8 : 8.8} fontWeight={li === 0 ? 400 : 700} fill={li === 0 ? '#cbd5e1' : '#ffffff'}>{l}</text>
+                                        ))}
+                                    </g>
+                                );
+                            })()}
                         </svg>
                     </div>
-                </div>
-            );
-        };
-
-        let selectedPlantLabelGlobal = 'Todas las áreas';
-
-        // --- GRÁFICA DE BARRAS: TURNO CON MÁS AFECTACIÓN ---
-        const ShiftBarChart = ({ data }) => {
-            const max = Math.max(...data.map(d => d.total), 1);
-            const maxIdx = data.map(d => d.total).indexOf(Math.max(...data.map(d => d.total)));
-            const colorFor = k => k === 'T1' ? '#0284c7' : k === 'T2' ? '#ea580c' : '#0891b2';
-            return (
-                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                    <h5 className="text-xs font-bold text-slate-600 mb-1 uppercase tracking-wider flex items-center gap-1.5"><span className="text-violet-500"><Icons.Layers /></span> Turno con más afectación</h5>
-                    <p className="text-[10px] text-slate-400 mb-3">Suma de arranques + llegadas fuera de tiempo · últimos 7 días · {selectedPlantLabelGlobal}</p>
-                    <div className="flex items-end justify-around gap-4 h-[130px]">
-                        {data.map((d, i) => (
-                            <div key={d.key} className="flex-1 flex flex-col items-center justify-end h-full group">
-                                <span className="text-sm font-extrabold text-slate-700 mb-1">{d.total}</span>
-                                <div className="w-full max-w-[46px] rounded-t-lg relative" style={{ height: `${Math.max(6, (d.total / max) * 90)}%`, backgroundColor: colorFor(d.key), opacity: i === maxIdx && d.total > 0 ? 1 : 0.55 }}>
-                                    {i === maxIdx && d.total > 0 && <span className="absolute -top-6 left-1/2 -translate-x-1/2 text-[9px] font-bold bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded-full whitespace-nowrap">MAYOR</span>}
-                                </div>
-                                <span className="mt-2 text-[11px] font-bold text-slate-600">{SHIFTS.find(s => s.key === d.key).label}</span>
-                            </div>
-                        ))}
-                    </div>
+                    {hoverIdx !== null && (
+                        <p className="text-[10px] text-slate-500 text-center mt-1 border-t border-slate-100 pt-1.5">
+                            <b className="text-slate-600">{days[hoverIdx].dayName} {days[hoverIdx].date}:</b> {series.map(s => `${multi ? s.code + ' ' : ''}${s.values[hoverIdx]}${suffix}`).join(' · ')}
+                        </p>
+                    )}
                 </div>
             );
         };
@@ -213,7 +243,7 @@
             const cls = zero ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-100 text-rose-700';
             return (
                 <td className="p-0 text-center align-middle">
-                    <button onClick={onClick} className={`cell-btn w-full h-full py-2.5 font-bold text-sm ${cls}`} title="Ver detalle">
+                    <button onClick={onClick} className={`cell-btn w-full h-full py-1 font-bold text-xs ${cls}`} title="Ver detalle">
                         {value}
                     </button>
                 </td>
@@ -261,26 +291,53 @@
             const [loadError, setLoadError] = useState(false);
             const [selectedDate, setSelectedDate] = useState(todayISO());
             const [selectedPlant, setSelectedPlant] = useState('Todas');
+            const [shiftTypeFilter, setShiftTypeFilter] = useState('Todos');
             const [detailInfo, setDetailInfo] = useState(null);
             const [downloadingImg, setDownloadingImg] = useState(false);
             const [downloadImgError, setDownloadImgError] = useState(false);
             const matrixCaptureRef = useRef(null);
+            const matrixScrollRef = useRef(null);
+
+            // Filtros independientes de la matriz diaria: controlan las tendencias semanal y mensual
+            // (no afectan la fecha de la matriz ni viceversa).
+            const [trendWeekAnchor, setTrendWeekAnchor] = useState(todayISO());
+            const [trendMonthAnchor, setTrendMonthAnchor] = useState(() => { const d = new Date(); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-01`; });
+            const shiftWeek = delta => setTrendWeekAnchor(d => isoAddDays(d, delta * 7));
+            const resetWeek = () => setTrendWeekAnchor(todayISO());
+            const shiftMonth = delta => setTrendMonthAnchor(iso => { const { y, m } = isoToParts(iso); const dt = new Date(Date.UTC(y, m - 1 + delta, 1)); return `${dt.getUTCFullYear()}-${pad2(dt.getUTCMonth() + 1)}-01`; });
+            const resetMonth = () => { const d = new Date(); setTrendMonthAnchor(`${d.getFullYear()}-${pad2(d.getMonth() + 1)}-01`); };
+
+            const visibleShifts = useMemo(() => SHIFTS.filter(sh => shiftTypeFilter === 'Todos' ? true : shiftTypeFilter === 'Fijos' ? sh.type === 'fijo' : sh.type === 'mixto'), [shiftTypeFilter]);
+            const plantsToShow = useMemo(() => selectedPlant === 'Todas' ? AREA_ROWS : AREA_ROWS.filter(a => a.plant === selectedPlant), [selectedPlant]);
 
             // Descarga solo el bloque de la matriz (tabla + leyenda) como imagen PNG, sin el resto del dashboard.
+            // Importante: la tabla vive dentro de un contenedor con scroll horizontal (overflow-x-auto), así que
+            // el ancho "visible" del contenedor NO es el ancho real de la tabla completa. Para no capturar solo
+            // lo que se ve en pantalla, se mide el scrollWidth real de la tabla/contenedor de scroll y, dentro de
+            // onclone, se fuerza ese contenedor a overflow:visible con su ancho completo antes de tomar la foto.
             const downloadMatrizImage = async () => {
                 const el = matrixCaptureRef.current;
+                const scrollBox = matrixScrollRef.current;
                 if (!el || typeof html2canvas === 'undefined') { setDownloadImgError(true); setTimeout(() => setDownloadImgError(false), 3000); return; }
                 setDownloadingImg(true); setDownloadImgError(false);
                 try {
+                    const tableEl = scrollBox ? scrollBox.querySelector('table') : null;
+                    const fullWidth = Math.max(el.scrollWidth, scrollBox ? scrollBox.scrollWidth : 0, tableEl ? tableEl.scrollWidth : 0);
                     const canvas = await html2canvas(el, {
                         backgroundColor: '#ffffff',
                         scale: 2,
                         useCORS: true,
                         scrollX: 0,
                         scrollY: -window.scrollY,
-                        width: el.scrollWidth,
+                        width: fullWidth,
                         height: el.scrollHeight,
-                        windowWidth: el.scrollWidth,
+                        windowWidth: fullWidth,
+                        onclone: (clonedDoc, clonedEl) => {
+                            const root = clonedEl || clonedDoc.querySelector('[data-matrix-capture]');
+                            if (root) { root.style.width = fullWidth + 'px'; root.style.maxWidth = 'none'; }
+                            const box = clonedDoc.querySelector('[data-matrix-scroll]');
+                            if (box) { box.style.overflow = 'visible'; box.style.width = fullWidth + 'px'; box.style.maxWidth = 'none'; }
+                        },
                     });
                     const link = document.createElement('a');
                     const plantSlug = (selectedPlant === 'Todas' ? 'Todas' : selectedPlant).replace(/\s+/g, '_');
@@ -317,8 +374,6 @@
                 const dm = metricsMap[`${date}_${plant}`];
                 return dm ? dm.serviceLevel : null;
             };
-
-            selectedPlantLabelGlobal = selectedPlant === 'Todas' ? 'Todas las áreas' : selectedPlant;
 
             // ---- MATRIZ DEL DÍA SELECCIONADO (siempre todas las áreas) ----
             const matrix = useMemo(() => {
@@ -363,32 +418,60 @@
                 return { dmy, rows, totals, dayIncidents };
             }, [incidents, selectedDate]);
 
-            // ---- VENTANA DE 7 DÍAS (respeta filtro de planta) PARA TENDENCIAS ----
-            const trend = useMemo(() => {
-                const days = [];
-                for (let off = -6; off <= 0; off++) {
-                    const iso = isoAddDays(selectedDate, off);
-                    const dmy = isoToDMY(iso);
-                    const list = incidents.filter(i => i.date === dmy && (selectedPlant === 'Todas' || i.plant === selectedPlant));
-                    const arranques = list.reduce((s, i) => s + (i.lateStarts || 0), 0);
-                    const llegadas = list.reduce((s, i) => s + (i.imp || 0) + (i.noImp || 0), 0);
-                    const accidents = list.reduce((s, i) => s + (i.accidents || 0), 0);
-                    const byShift = { T1: 0, T2: 0, T3: 0 };
-                    SHIFTS.forEach(sh => {
-                        const sl = list.filter(i => i.shift === sh.key);
-                        byShift[sh.key] = sl.reduce((s, i) => s + (i.lateStarts || 0) + (i.imp || 0) + (i.noImp || 0), 0);
-                    });
-                    days.push({ date: dmy, dayName: isoWeekdayShort(iso), arranques, llegadas, accidents, byShift });
-                }
-                const shiftTotals = SHIFTS.map(sh => ({ key: sh.key, total: days.reduce((s, d) => s + d.byShift[sh.key], 0) }));
-                return { days, shiftTotals };
-            }, [incidents, selectedDate, selectedPlant]);
+            // ---- Agrega arranques/llegadas/percances/fallas mecánicas por planta para UN día (todos los turnos) ----
+            const dayBucket = (iso) => {
+                const dmy = isoToDMY(iso);
+                const dayIncidents = incidents.filter(i => i.date === dmy);
+                const perPlant = {};
+                AREA_ROWS.forEach(a => {
+                    const list = dayIncidents.filter(i => i.plant === a.plant);
+                    perPlant[a.plant] = {
+                        arranques: list.reduce((s, i) => s + (i.lateStarts || 0), 0),
+                        llegadas: list.reduce((s, i) => s + (i.imp || 0) + (i.noImp || 0), 0),
+                        accidents: list.reduce((s, i) => s + (i.accidents || 0), 0),
+                        mech: list.reduce((s, i) => s + (i.mechanicalFailures || 0), 0),
+                    };
+                });
+                return perPlant;
+            };
 
-            // ---- TABLA DE DETALLE (día + planta seleccionados) ----
-            const detailTable = useMemo(() => {
-                return matrix.dayIncidents.filter(i => selectedPlant === 'Todas' || i.plant === selectedPlant)
-                    .sort((a, b) => a.plant.localeCompare(b.plant) || a.shift.localeCompare(b.shift));
-            }, [matrix, selectedPlant]);
+            // ---- TENDENCIA SEMANAL (lunes a domingo de la semana elegida; filtro de semana independiente del de la matriz) ----
+            const trendWeek = useMemo(() => {
+                const weekStart = isoWeekStart(trendWeekAnchor);
+                const weekEnd = isoAddDays(weekStart, 6);
+                const days = [];
+                for (let off = 0; off <= 6; off++) {
+                    const iso = isoAddDays(weekStart, off);
+                    days.push({ date: isoToDMY(iso), dayName: isoWeekdayShort(iso), iso, perPlant: dayBucket(iso) });
+                }
+                return { weekStart, weekEnd, days, label: `${isoShortDayMonth(weekStart)} – ${isoShortDayMonth(weekEnd)} ${isoToParts(weekEnd).y}` };
+            }, [incidents, trendWeekAnchor]);
+
+            // ---- TENDENCIA MENSUAL (agrupada por semana del mes elegido, no por día; filtro de mes independiente del de la matriz) ----
+            const trendMonth = useMemo(() => {
+                const { y, m } = isoToParts(trendMonthAnchor);
+                const numDays = isoDaysInMonth(trendMonthAnchor);
+                const weeksCount = Math.ceil(numDays / 7);
+                const days = [];
+                for (let w = 0; w < weeksCount; w++) {
+                    const startDay = w * 7 + 1;
+                    const endDay = Math.min(startDay + 6, numDays);
+                    const perPlant = {};
+                    AREA_ROWS.forEach(a => { perPlant[a.plant] = { arranques: 0, llegadas: 0, accidents: 0, mech: 0 }; });
+                    for (let d = startDay; d <= endDay; d++) {
+                        const b = dayBucket(`${y}-${pad2(m)}-${pad2(d)}`);
+                        AREA_ROWS.forEach(a => {
+                            perPlant[a.plant].arranques += b[a.plant].arranques;
+                            perPlant[a.plant].llegadas += b[a.plant].llegadas;
+                            perPlant[a.plant].accidents += b[a.plant].accidents;
+                            perPlant[a.plant].mech += b[a.plant].mech;
+                        });
+                    }
+                    const rango = startDay === endDay ? `${startDay}` : `${startDay}-${endDay}`;
+                    days.push({ date: rango, dayName: `Sem ${w + 1}`, iso: `${y}-${pad2(m)}-${pad2(startDay)}`, perPlant });
+                }
+                return { days, label: isoMonthLabel(trendMonthAnchor) };
+            }, [incidents, trendMonthAnchor]);
 
             const dayStats = useMemo(() => {
                 const list = matrix.dayIncidents;
@@ -567,8 +650,6 @@
                 });
             };
 
-            const shiftDot = k => k === 'T1' ? 'bg-sky-500' : k === 'T2' ? 'bg-orange-500' : 'bg-cyan-500';
-
             return (
                 <div className="min-h-screen pb-12">
                     <header className="bg-slate-900 text-white shadow-lg sticky top-0 z-30">
@@ -624,47 +705,52 @@
                         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 sm:p-6">
                             <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
                                 <h3 className="font-bold flex gap-2 items-center"><span className="text-slate-500"><Icons.Table /></span> Matriz diaria por área y turno</h3>
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                    <div className="flex items-center bg-slate-100 border border-slate-200 rounded overflow-hidden text-xs">
+                                        {SHIFT_TYPE_FILTERS.map(opt => (
+                                            <button key={opt} onClick={() => setShiftTypeFilter(opt)} className={`px-2.5 py-1.5 font-bold ${shiftTypeFilter === opt ? 'bg-slate-800 text-white' : 'text-slate-500 hover:bg-slate-200'}`}>{opt}</button>
+                                        ))}
+                                    </div>
                                     {downloadImgError && <span className="text-[11px] text-red-500">No se pudo generar la imagen</span>}
                                     <button onClick={downloadMatrizImage} disabled={downloadingImg} className="text-xs font-bold bg-slate-800 hover:bg-slate-900 text-white px-3 py-1.5 rounded flex items-center gap-1.5 disabled:opacity-60">
                                         {downloadingImg ? <span className="loader-sm"></span> : <Icons.Download />}Descargar imagen
                                     </button>
                                 </div>
                             </div>
-                            <div ref={matrixCaptureRef} className="bg-white">
+                            <div ref={matrixCaptureRef} data-matrix-capture="true" className="bg-white">
                             <div className="flex items-center gap-2 mb-2">
                                 <span className="text-slate-500"><Icons.Table /></span>
                                 <h4 className="font-bold text-slate-800 text-sm">Matriz diaria por área y turno</h4>
-                                <span className="text-xs text-slate-400">— {isoLongLabel(selectedDate)} · {selectedPlant === 'Todas' ? 'Todas las áreas' : selectedPlant}</span>
+                                <span className="text-xs text-slate-400">— {isoLongLabel(selectedDate)} · {selectedPlant === 'Todas' ? 'Todas las áreas' : selectedPlant} · {shiftTypeFilter}</span>
                             </div>
-                            <div className="overflow-x-auto">
-                                <table className="matrix-tbl w-full text-xs border-collapse min-w-[900px]">
+                            <div ref={matrixScrollRef} data-matrix-scroll="true" className="overflow-x-auto">
+                                <table className={`matrix-tbl w-full text-[11px] border-collapse ${visibleShifts.length > 3 ? 'min-w-[920px]' : 'min-w-[600px]'}`}>
                                     <thead>
                                         <tr>
-                                            <th rowSpan="2" className="bg-slate-800 text-white p-2 sticky left-0 z-10">Área</th>
-                                            {SHIFTS.map(sh => <th key={sh.key} colSpan="2" className={`p-2 font-bold ${sh.head}`}>{sh.label}</th>)}
-                                            <th colSpan="3" className="bg-slate-900 text-white p-2 font-bold tracking-wider">ACCIDENTES Y FALLAS MEC.</th>
+                                            <th rowSpan="2" className="bg-slate-800 text-white p-1 sticky left-0 z-10">Área</th>
+                                            {visibleShifts.map(sh => <th key={sh.key} colSpan="2" className={`p-1 font-bold text-[10px] leading-tight ${sh.head}`}>{sh.label}</th>)}
+                                            <th colSpan="3" className="bg-slate-900 text-white p-1 font-bold text-[10px]">ACC. Y FALLAS MEC.</th>
                                         </tr>
                                         <tr>
-                                            {SHIFTS.map(sh => (
+                                            {visibleShifts.map(sh => (
                                                 <React.Fragment key={sh.key}>
-                                                    <th className="bg-white p-1.5 font-semibold text-slate-500"><span className="flex items-center justify-center gap-1 text-sky-600"><Icons.ArrowUpRight />Arranques<br />fuera tiempo</span></th>
-                                                    <th className="bg-white p-1.5 font-semibold text-slate-500"><span className="flex items-center justify-center gap-1 text-rose-500"><Icons.ArrowDownRight />Llegadas<br />fuera de tiempo</span></th>
+                                                    <th className="bg-white p-0.5 font-semibold text-slate-500 text-[10px]" title="Arranques fuera de tiempo"><span className="flex items-center justify-center gap-0.5 text-sky-600"><Icons.ArrowUpRight />Arranques</span></th>
+                                                    <th className="bg-white p-0.5 font-semibold text-slate-500 text-[10px]" title="Llegadas fuera de tiempo"><span className="flex items-center justify-center gap-0.5 text-rose-500"><Icons.ArrowDownRight />Llegadas</span></th>
                                                 </React.Fragment>
                                             ))}
-                                            {ACC_COLS.map(c => <th key={c.key} className={`${c.head} text-white p-2 font-bold`}>{c.key}</th>)}
+                                            {ACC_COLS.map(c => <th key={c.key} className={`${c.head} text-white p-1 font-bold text-[10px]`}>{c.key}</th>)}
                                         </tr>
                                     </thead>
                                     <tbody>
                                         {matrix.rows.map(r => (
                                             <tr key={r.area.code}>
-                                                <td className="p-2 font-bold text-slate-700 bg-slate-50 sticky left-0 z-10">
-                                                    <div className="flex items-center gap-2"><span className="w-2.5 h-2.5 rounded-full inline-block" style={{ backgroundColor: r.area.color }}></span>{r.area.code}</div>
+                                                <td className="p-1 font-bold text-slate-700 bg-slate-50 sticky left-0 z-10">
+                                                    <div className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full inline-block" style={{ backgroundColor: r.area.color }}></span>{r.area.code}</div>
                                                 </td>
-                                                {r.shiftsData.map(sd => {
-                                                    const shDef = SHIFTS.find(s => s.key === sd.key);
+                                                {visibleShifts.map(shDef => {
+                                                    const sd = r.shiftsData.find(x => x.key === shDef.key);
                                                     return (
-                                                        <React.Fragment key={sd.key}>
+                                                        <React.Fragment key={shDef.key}>
                                                             <MatrixCell value={sd.arranques} onClick={() => openArranquesDetail(r.area, shDef)} />
                                                             <MatrixCell value={sd.llegadas} onClick={() => openLlegadasDetail(r.area, shDef)} />
                                                         </React.Fragment>
@@ -674,14 +760,17 @@
                                             </tr>
                                         ))}
                                         <tr className="font-bold">
-                                            <td className="p-2 bg-slate-800 text-white sticky left-0 z-10">Total</td>
-                                            {matrix.totals.shifts.map(t => (
-                                                <React.Fragment key={t.key}>
-                                                    <td className="p-0 text-center bg-slate-100"><button onClick={() => openTotalsDetail('arranques', t.key)} className="cell-btn w-full h-full py-2.5 text-slate-800">{t.arranques}</button></td>
-                                                    <td className="p-0 text-center bg-slate-100"><button onClick={() => openTotalsDetail('llegadas', t.key)} className="cell-btn w-full h-full py-2.5 text-slate-800">{t.llegadas}</button></td>
-                                                </React.Fragment>
-                                            ))}
-                                            {ACC_COLS.map(c => <td key={c.key} className="p-0 text-center bg-slate-100"><button onClick={() => openTotalsDetail('acc', c.key)} className="cell-btn w-full h-full py-2.5 text-slate-800">{matrix.totals.acc[c.key]}</button></td>)}
+                                            <td className="p-1 bg-slate-800 text-white sticky left-0 z-10 text-xs">Total</td>
+                                            {visibleShifts.map(shDef => {
+                                                const t = matrix.totals.shifts.find(x => x.key === shDef.key);
+                                                return (
+                                                    <React.Fragment key={shDef.key}>
+                                                        <td className="p-0 text-center bg-slate-100"><button onClick={() => openTotalsDetail('arranques', shDef.key)} className="cell-btn w-full h-full py-1 text-xs text-slate-800">{t.arranques}</button></td>
+                                                        <td className="p-0 text-center bg-slate-100"><button onClick={() => openTotalsDetail('llegadas', shDef.key)} className="cell-btn w-full h-full py-1 text-xs text-slate-800">{t.llegadas}</button></td>
+                                                    </React.Fragment>
+                                                );
+                                            })}
+                                            {ACC_COLS.map(c => <td key={c.key} className="p-0 text-center bg-slate-100"><button onClick={() => openTotalsDetail('acc', c.key)} className="cell-btn w-full h-full py-1 text-xs text-slate-800">{matrix.totals.acc[c.key]}</button></td>)}
                                         </tr>
                                     </tbody>
                                 </table>
@@ -691,48 +780,45 @@
                             </div>
                         </div>
 
-                        {/* TENDENCIAS 7 DÍAS */}
+                        {/* TENDENCIAS SEMANALES (filtro de semana independiente al de la matriz; respeta el filtro de planta) */}
                         <div>
-                            <h3 className="text-lg font-bold text-slate-700 mb-4 flex items-center gap-2"><span className="bg-slate-200 p-1 rounded"><Icons.BarChart2 /></span> Tendencias — últimos 7 días al {selectedDate.split('-').reverse().join('/')}</h3>
-                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
-                                <TrendLine title="Arranques fuera de tiempo" data={trend.days} dataKey="arranques" color="#0284c7" icon={Icons.Clock} />
-                                <TrendLine title="Llegadas fuera de tiempo" data={trend.days} dataKey="llegadas" color="#e11d48" icon={Icons.AlertOctagon} />
-                                <ShiftBarChart data={trend.shiftTotals} />
-                                <TrendLine title="Percances" data={trend.days} dataKey="accidents" color="#ea580c" icon={Icons.AlertOctagon} highlightMaxDay={true} />
+                            <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
+                                <h3 className="text-lg font-bold text-slate-700 flex items-center gap-2"><span className="bg-slate-200 p-1 rounded"><Icons.BarChart2 /></span> Tendencias semanales</h3>
+                                <div className="flex items-center gap-2 flex-wrap">
+                                    <div className="flex items-center bg-white border border-slate-200 rounded overflow-hidden text-sm">
+                                        <button onClick={() => shiftWeek(-1)} className="px-2 py-1.5 hover:bg-slate-100 text-slate-500"><Icons.ChevronLeft /></button>
+                                        <span className="px-2 text-xs font-semibold text-slate-600 whitespace-nowrap">{trendWeek.label}</span>
+                                        <button onClick={() => shiftWeek(1)} className="px-2 py-1.5 hover:bg-slate-100 text-slate-500"><Icons.ChevronRight /></button>
+                                    </div>
+                                    <button onClick={resetWeek} className="bg-white border border-slate-200 hover:bg-slate-100 px-3 py-1.5 rounded text-xs text-slate-500 font-semibold">Esta semana</button>
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                                <MultiTrendLine title="Arranques fuera de tiempo" icon={Icons.Clock} metricKey="arranques" days={trendWeek.days} plants={plantsToShow} colorSingle="#0284c7" />
+                                <MultiTrendLine title="Llegadas fuera de tiempo" icon={Icons.AlertOctagon} metricKey="llegadas" days={trendWeek.days} plants={plantsToShow} colorSingle="#e11d48" />
+                                <MultiTrendLine title="Percances" icon={Icons.Activity} metricKey="accidents" days={trendWeek.days} plants={plantsToShow} colorSingle="#ea580c" />
+                                <MultiTrendLine title="Fallas Mecánicas" icon={Icons.Wrench} metricKey="mech" days={trendWeek.days} plants={plantsToShow} colorSingle="#7c3aed" />
                             </div>
                         </div>
 
-                        {/* DETALLE DE INCIDENCIAS DEL DÍA */}
-                        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                            <div className="p-4 bg-slate-50 font-bold border-b flex justify-between items-center">
-                                <span className="flex gap-2 items-center"><span className="text-rose-500"><Icons.Layers /></span> Detalle de incidencias — {selectedPlant === 'Todas' ? 'todas las áreas' : selectedPlant}</span>
-                                <span className="text-xs bg-rose-100 text-rose-700 px-2 py-1 rounded-full">{detailTable.length}</span>
+                        {/* TENDENCIAS MENSUALES (filtro de mes independiente al de la matriz; respeta el filtro de planta) */}
+                        <div>
+                            <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
+                                <h3 className="text-lg font-bold text-slate-700 flex items-center gap-2"><span className="bg-slate-200 p-1 rounded"><Icons.BarChart2 /></span> Tendencias mensuales <span className="text-[11px] font-normal text-slate-400">(agrupado por semana)</span></h3>
+                                <div className="flex items-center gap-2 flex-wrap">
+                                    <div className="flex items-center bg-white border border-slate-200 rounded overflow-hidden text-sm">
+                                        <button onClick={() => shiftMonth(-1)} className="px-2 py-1.5 hover:bg-slate-100 text-slate-500"><Icons.ChevronLeft /></button>
+                                        <span className="px-2 text-xs font-semibold text-slate-600 whitespace-nowrap">{trendMonth.label}</span>
+                                        <button onClick={() => shiftMonth(1)} className="px-2 py-1.5 hover:bg-slate-100 text-slate-500"><Icons.ChevronRight /></button>
+                                    </div>
+                                    <button onClick={resetMonth} className="bg-white border border-slate-200 hover:bg-slate-100 px-3 py-1.5 rounded text-xs text-slate-500 font-semibold">Este mes</button>
+                                </div>
                             </div>
-                            <div className="max-h-72 overflow-y-auto">
-                                <table className="w-full text-sm text-left">
-                                    <thead className="sticky top-0 bg-slate-50 text-slate-500 shadow-sm z-10">
-                                        <tr>
-                                            <th className="p-3">Área</th><th className="p-3">Turno</th>
-                                            <th className="p-3 text-center bg-sky-50 text-sky-600">Arranques</th>
-                                            <th className="p-3 text-center bg-rose-50 text-rose-600">Llegadas</th>
-                                            <th className="p-3 text-center bg-orange-50 text-orange-600">Percances</th>
-                                            <th className="p-3 text-center">N.S.</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y">
-                                        {detailTable.length === 0 && <tr><td colSpan="6" className="p-6 text-center text-slate-400">Sin registros para este día / área.</td></tr>}
-                                        {detailTable.map(inc => (
-                                            <tr key={inc.id} className="hover:bg-slate-50">
-                                                <td className="p-3 font-medium text-slate-700">{inc.plant}</td>
-                                                <td className="p-3"><span className="flex items-center gap-1.5"><span className={`w-2 h-2 rounded-full inline-block ${shiftDot(inc.shift)}`}></span>{inc.shift}</span></td>
-                                                <td className="p-3 text-center font-bold text-sky-600">{inc.lateStarts || 0}</td>
-                                                <td className="p-3 text-center font-bold text-rose-600">{(inc.imp || 0) + (inc.noImp || 0)}</td>
-                                                <td className="p-3 text-center font-bold text-orange-600">{inc.accidents || 0}</td>
-                                                <td className="p-3 text-center font-bold text-emerald-600">{(() => { const sl = serviceLevelFor(inc.date, inc.plant); const v = sl != null ? sl : inc.serviceLevel; return v != null ? v + '%' : '-'; })()}</td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                                <MultiTrendLine title="Arranques fuera de tiempo" icon={Icons.Clock} metricKey="arranques" days={trendMonth.days} plants={plantsToShow} colorSingle="#0284c7" />
+                                <MultiTrendLine title="Llegadas fuera de tiempo" icon={Icons.AlertOctagon} metricKey="llegadas" days={trendMonth.days} plants={plantsToShow} colorSingle="#e11d48" />
+                                <MultiTrendLine title="Percances" icon={Icons.Activity} metricKey="accidents" days={trendMonth.days} plants={plantsToShow} colorSingle="#ea580c" />
+                                <MultiTrendLine title="Fallas Mecánicas" icon={Icons.Wrench} metricKey="mech" days={trendMonth.days} plants={plantsToShow} colorSingle="#7c3aed" />
                             </div>
                         </div>
                     </main>
