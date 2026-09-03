@@ -141,8 +141,6 @@
         const isoWeekdayNum = iso => { const { y, m, d } = isoToParts(iso); const wd = new Date(Date.UTC(y, m - 1, d)).getUTCDay(); return wd === 0 ? 7 : wd; };
         const isoWeekStart = iso => isoAddDays(iso, -(isoWeekdayNum(iso) - 1));
         const isoShortDayMonth = iso => { const { y, m, d } = isoToParts(iso); const s = new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('es-ES', { day: '2-digit', month: 'short', timeZone: 'UTC' }); return s.replace('.', ''); };
-        const isoDaysInMonth = iso => { const { y, m } = isoToParts(iso); return new Date(Date.UTC(y, m, 0)).getUTCDate(); };
-        const isoMonthLabel = iso => { const { y, m } = isoToParts(iso); const s = new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString('es-ES', { month: 'long', year: 'numeric', timeZone: 'UTC' }); return s.charAt(0).toUpperCase() + s.slice(1); };
 
         // --- GRÁFICA DE TENDENCIA MULTI-PLANTA (semanal o mensual, hasta 5 líneas — una por planta) ---
         // Cuando el filtro global de planta = "Todas" dibuja una línea por cada una de las 5 plantas;
@@ -156,13 +154,17 @@
             const allValues = series.flatMap(s => s.values);
             const min = Math.min(...allValues, 0); const max = Math.max(...allValues, 1);
             const pad = (max - min) * 0.25 || 1; const domainMin = Math.max(0, min - pad); const domainMax = max + pad; const range = (domainMax - domainMin) || 1;
-            const width = 620; const height = 170; const marginX = 24; const marginY = 28;
+            const width = 620; const height = 170; const marginY = 28;
+            // Margen izquierdo más ancho para dejar espacio a las etiquetas numéricas del eje Y.
+            const marginL = compact ? 26 : 30; const marginR = 14;
             const n = days.length;
-            const xAt = i => marginX + (n <= 1 ? 0 : (i / (n - 1)) * (width - 2 * marginX));
+            const xAt = i => marginL + (n <= 1 ? 0 : (i / (n - 1)) * (width - marginL - marginR));
             const yAt = v => height - marginY - ((v - domainMin) / range) * (height - 2 * marginY);
             const [hoverIdx, setHoverIdx] = useState(null);
             const labelEvery = compact ? Math.max(1, Math.ceil(n / 10)) : 1;
             const lineColor = multi ? null : colorSingle;
+            // Eje Y visual: línea vertical + marcas con su valor numérico en 5 niveles (incluye tope y base).
+            const yTicks = [0, 0.25, 0.5, 0.75, 1].map(f => ({ y: marginY + f * (height - 2 * marginY), value: Math.round(domainMax - f * range) }));
             return (
                 <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
                     <div className="flex items-center justify-between mb-1 flex-wrap gap-1.5">
@@ -176,7 +178,10 @@
                     <p className="text-[10px] text-slate-400 mb-2">{multi ? 'Todas las áreas' : plants[0].plant}</p>
                     <div className="relative w-full flex justify-center">
                         <svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} className="overflow-visible">
-                            {[0.25, 0.5, 0.75].map((f, i) => <line key={i} x1={marginX} x2={width - marginX} y1={marginY + f * (height - 2 * marginY)} y2={marginY + f * (height - 2 * marginY)} stroke="#f1f5f9" strokeWidth="1" />)}
+                            {yTicks.map((t, i) => <line key={i} x1={marginL} x2={width - marginR} y1={t.y} y2={t.y} stroke="#f1f5f9" strokeWidth="1" />)}
+                            {/* Eje Y: línea vertical + etiqueta numérica en cada marca */}
+                            <line x1={marginL} x2={marginL} y1={marginY} y2={height - marginY} stroke="#cbd5e1" strokeWidth="1" />
+                            {yTicks.map((t, i) => (i === 0 || t.value !== yTicks[i - 1].value) && <text key={i} x={marginL - 5} y={t.y + 3} textAnchor="end" fontSize={compact ? 7.5 : 8.5} fill="#94a3b8">{t.value}</text>)}
                             {hoverIdx !== null && <line x1={xAt(hoverIdx)} x2={xAt(hoverIdx)} y1={marginY} y2={height - marginY} stroke="#cbd5e1" strokeWidth="1" strokeDasharray="3,2" />}
                             {series.map(s => {
                                 const pts = s.values.map((v, i) => `${xAt(i)},${yAt(v)}`).join(' ');
@@ -206,7 +211,7 @@
                                 const boxH = lines.length * lineH + 8;
                                 const topY = Math.min(...series.map(s => yAt(s.values[hoverIdx])));
                                 let boxX = xAt(hoverIdx) - boxW / 2;
-                                boxX = Math.max(2, Math.min(width - boxW - 2, boxX));
+                                boxX = Math.max(marginL + 2, Math.min(width - boxW - 2, boxX));
                                 let boxY = topY - boxH - 9;
                                 if (boxY < 1) boxY = topY + 11;
                                 return (
@@ -238,7 +243,17 @@
         );
 
         // --- CELDA DE MATRIZ (clicable) ---
-        const MatrixCell = ({ value, onClick, tone = 'auto' }) => {
+        // hasData = ¿existe al menos un reporte capturado para este cruce área/turno? Si no, la celda se deja
+        // vacía (no se asume "0") hasta que capturen datos. Si sí hay reporte, se muestra el valor real
+        // (que puede legítimamente ser 0 si el reporte confirma que no hubo incidencias).
+        const MatrixCell = ({ value, onClick, hasData = true, tone = 'auto' }) => {
+            if (!hasData) {
+                return (
+                    <td className="p-0 text-center align-middle">
+                        <span className="block w-full h-full py-1 text-xs text-slate-300 select-none" title="Sin datos capturados aún">—</span>
+                    </td>
+                );
+            }
             const zero = value === 0;
             const cls = zero ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-100 text-rose-700';
             return (
@@ -299,13 +314,21 @@
             const matrixScrollRef = useRef(null);
 
             // Filtros independientes de la matriz diaria: controlan las tendencias semanal y mensual
-            // (no afectan la fecha de la matriz ni viceversa).
-            const [trendWeekAnchor, setTrendWeekAnchor] = useState(todayISO());
-            const [trendMonthAnchor, setTrendMonthAnchor] = useState(() => { const d = new Date(); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-01`; });
-            const shiftWeek = delta => setTrendWeekAnchor(d => isoAddDays(d, delta * 7));
-            const resetWeek = () => setTrendWeekAnchor(todayISO());
-            const shiftMonth = delta => setTrendMonthAnchor(iso => { const { y, m } = isoToParts(iso); const dt = new Date(Date.UTC(y, m - 1 + delta, 1)); return `${dt.getUTCFullYear()}-${pad2(dt.getUTCMonth() + 1)}-01`; });
-            const resetMonth = () => { const d = new Date(); setTrendMonthAnchor(`${d.getFullYear()}-${pad2(d.getMonth() + 1)}-01`); };
+            // (no afectan la fecha de la matriz ni viceversa). Cada bloque tiene su propio rango de
+            // fecha de inicio/fin (en vez de navegación fija por semana/mes) para poder ampliar el
+            // rango de la gráfica; por defecto arrancan en la semana y el mes corrientes.
+            const currentMonthRange = () => {
+                const d = new Date();
+                const y = d.getFullYear(), m = d.getMonth() + 1;
+                const lastDay = new Date(y, m, 0).getDate();
+                return { start: `${y}-${pad2(m)}-01`, end: `${y}-${pad2(m)}-${pad2(lastDay)}` };
+            };
+            const [weekRangeStart, setWeekRangeStart] = useState(() => isoWeekStart(todayISO()));
+            const [weekRangeEnd, setWeekRangeEnd] = useState(() => isoAddDays(isoWeekStart(todayISO()), 6));
+            const [monthRangeStart, setMonthRangeStart] = useState(() => currentMonthRange().start);
+            const [monthRangeEnd, setMonthRangeEnd] = useState(() => currentMonthRange().end);
+            const resetWeekRange = () => { const s = isoWeekStart(todayISO()); setWeekRangeStart(s); setWeekRangeEnd(isoAddDays(s, 6)); };
+            const resetMonthRange = () => { const r = currentMonthRange(); setMonthRangeStart(r.start); setMonthRangeEnd(r.end); };
 
             const visibleShifts = useMemo(() => SHIFTS.filter(sh => shiftTypeFilter === 'Todos' ? true : shiftTypeFilter === 'Fijos' ? sh.type === 'fijo' : sh.type === 'mixto'), [shiftTypeFilter]);
             const plantsToShow = useMemo(() => selectedPlant === 'Todas' ? AREA_ROWS : AREA_ROWS.filter(a => a.plant === selectedPlant), [selectedPlant]);
@@ -435,31 +458,39 @@
                 return perPlant;
             };
 
-            // ---- TENDENCIA SEMANAL (lunes a domingo de la semana elegida; filtro de semana independiente del de la matriz) ----
+            // ---- TENDENCIA SEMANAL (un punto por día entre la fecha de inicio y fin elegidas; rango independiente del de la matriz) ----
             const trendWeek = useMemo(() => {
-                const weekStart = isoWeekStart(trendWeekAnchor);
-                const weekEnd = isoAddDays(weekStart, 6);
+                let start = weekRangeStart, end = weekRangeEnd;
+                if (!start || !end) return { days: [], label: '—' };
+                if (end < start) { const t = start; start = end; end = t; }
                 const days = [];
-                for (let off = 0; off <= 6; off++) {
-                    const iso = isoAddDays(weekStart, off);
-                    days.push({ date: isoToDMY(iso), dayName: isoWeekdayShort(iso), iso, perPlant: dayBucket(iso) });
+                let cur = start, guard = 0;
+                while (guard < 370) { // tope de seguridad (~1 año de días) por si el usuario elige un rango enorme
+                    days.push({ date: isoToDMY(cur), dayName: isoWeekdayShort(cur), iso: cur, perPlant: dayBucket(cur) });
+                    if (cur === end) break;
+                    cur = isoAddDays(cur, 1);
+                    guard++;
                 }
-                return { weekStart, weekEnd, days, label: `${isoShortDayMonth(weekStart)} – ${isoShortDayMonth(weekEnd)} ${isoToParts(weekEnd).y}` };
-            }, [incidents, trendWeekAnchor]);
+                return { days, label: `${isoShortDayMonth(start)} – ${isoShortDayMonth(end)} ${isoToParts(end).y}` };
+            }, [incidents, weekRangeStart, weekRangeEnd]);
 
-            // ---- TENDENCIA MENSUAL (agrupada por semana del mes elegido, no por día; filtro de mes independiente del de la matriz) ----
+            // ---- TENDENCIA MENSUAL (un punto por semana lunes-domingo entre la fecha de inicio y fin elegidas; rango independiente del de la matriz) ----
             const trendMonth = useMemo(() => {
-                const { y, m } = isoToParts(trendMonthAnchor);
-                const numDays = isoDaysInMonth(trendMonthAnchor);
-                const weeksCount = Math.ceil(numDays / 7);
+                let start = monthRangeStart, end = monthRangeEnd;
+                if (!start || !end) return { days: [], label: '—' };
+                if (end < start) { const t = start; start = end; end = t; }
                 const days = [];
-                for (let w = 0; w < weeksCount; w++) {
-                    const startDay = w * 7 + 1;
-                    const endDay = Math.min(startDay + 6, numDays);
+                let weekStart = isoWeekStart(start), weekIdx = 1, guard = 0;
+                while (weekStart <= end && guard < 80) { // tope de seguridad (~80 semanas) por si el usuario elige un rango enorme
+                    const weekEnd = isoAddDays(weekStart, 6);
                     const perPlant = {};
                     AREA_ROWS.forEach(a => { perPlant[a.plant] = { arranques: 0, llegadas: 0, accidents: 0, mech: 0 }; });
-                    for (let d = startDay; d <= endDay; d++) {
-                        const b = dayBucket(`${y}-${pad2(m)}-${pad2(d)}`);
+                    let anyDayInRange = false;
+                    for (let off = 0; off <= 6; off++) {
+                        const iso = isoAddDays(weekStart, off);
+                        if (iso < start || iso > end) continue;
+                        anyDayInRange = true;
+                        const b = dayBucket(iso);
                         AREA_ROWS.forEach(a => {
                             perPlant[a.plant].arranques += b[a.plant].arranques;
                             perPlant[a.plant].llegadas += b[a.plant].llegadas;
@@ -467,11 +498,15 @@
                             perPlant[a.plant].mech += b[a.plant].mech;
                         });
                     }
-                    const rango = startDay === endDay ? `${startDay}` : `${startDay}-${endDay}`;
-                    days.push({ date: rango, dayName: `Sem ${w + 1}`, iso: `${y}-${pad2(m)}-${pad2(startDay)}`, perPlant });
+                    if (anyDayInRange) {
+                        days.push({ date: `${isoShortDayMonth(weekStart)} - ${isoShortDayMonth(weekEnd)}`, dayName: `Sem ${weekIdx}`, iso: weekStart, perPlant });
+                        weekIdx++;
+                    }
+                    weekStart = isoAddDays(weekStart, 7);
+                    guard++;
                 }
-                return { days, label: isoMonthLabel(trendMonthAnchor) };
-            }, [incidents, trendMonthAnchor]);
+                return { days, label: `${isoShortDayMonth(start)} – ${isoShortDayMonth(end)} ${isoToParts(end).y}` };
+            }, [incidents, monthRangeStart, monthRangeEnd]);
 
             const dayStats = useMemo(() => {
                 const list = matrix.dayIncidents;
@@ -742,7 +777,12 @@
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {matrix.rows.map(r => (
+                                        {matrix.rows.map(r => {
+                                            // ¿Se capturó al menos un reporte para esta área en algún turno hoy?
+                                            // Los accidentes/fallas mecánicas se registran a nivel área (no por turno),
+                                            // así que su "hay datos" depende de si hubo algún reporte ese día.
+                                            const areaHasData = r.shiftsData.some(sd => sd.list.length > 0);
+                                            return (
                                             <tr key={r.area.code}>
                                                 <td className="p-1 font-bold text-slate-700 bg-slate-50 sticky left-0 z-10">
                                                     <div className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full inline-block" style={{ backgroundColor: r.area.color }}></span>{r.area.code}</div>
@@ -751,31 +791,51 @@
                                                     const sd = r.shiftsData.find(x => x.key === shDef.key);
                                                     return (
                                                         <React.Fragment key={shDef.key}>
-                                                            <MatrixCell value={sd.arranques} onClick={() => openArranquesDetail(r.area, shDef)} />
-                                                            <MatrixCell value={sd.llegadas} onClick={() => openLlegadasDetail(r.area, shDef)} />
+                                                            <MatrixCell value={sd.arranques} hasData={sd.list.length > 0} onClick={() => openArranquesDetail(r.area, shDef)} />
+                                                            <MatrixCell value={sd.llegadas} hasData={sd.list.length > 0} onClick={() => openLlegadasDetail(r.area, shDef)} />
                                                         </React.Fragment>
                                                     );
                                                 })}
-                                                {ACC_COLS.map(c => <MatrixCell key={c.key} value={r.acc[c.key]} onClick={() => openAccDetail(r.area, c)} />)}
+                                                {ACC_COLS.map(c => <MatrixCell key={c.key} value={r.acc[c.key]} hasData={areaHasData} onClick={() => openAccDetail(r.area, c)} />)}
                                             </tr>
-                                        ))}
+                                            );
+                                        })}
                                         <tr className="font-bold">
                                             <td className="p-1 bg-slate-800 text-white sticky left-0 z-10 text-xs">Total</td>
                                             {visibleShifts.map(shDef => {
                                                 const t = matrix.totals.shifts.find(x => x.key === shDef.key);
+                                                const shiftHasData = matrix.rows.some(r => r.shiftsData.find(x => x.key === shDef.key).list.length > 0);
                                                 return (
                                                     <React.Fragment key={shDef.key}>
-                                                        <td className="p-0 text-center bg-slate-100"><button onClick={() => openTotalsDetail('arranques', shDef.key)} className="cell-btn w-full h-full py-1 text-xs text-slate-800">{t.arranques}</button></td>
-                                                        <td className="p-0 text-center bg-slate-100"><button onClick={() => openTotalsDetail('llegadas', shDef.key)} className="cell-btn w-full h-full py-1 text-xs text-slate-800">{t.llegadas}</button></td>
+                                                        {shiftHasData ? (
+                                                            <>
+                                                                <td className="p-0 text-center bg-slate-100"><button onClick={() => openTotalsDetail('arranques', shDef.key)} className="cell-btn w-full h-full py-1 text-xs text-slate-800">{t.arranques}</button></td>
+                                                                <td className="p-0 text-center bg-slate-100"><button onClick={() => openTotalsDetail('llegadas', shDef.key)} className="cell-btn w-full h-full py-1 text-xs text-slate-800">{t.llegadas}</button></td>
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <td className="p-0 text-center bg-slate-100"><span className="block w-full h-full py-1 text-xs text-slate-300 select-none" title="Sin datos capturados aún">—</span></td>
+                                                                <td className="p-0 text-center bg-slate-100"><span className="block w-full h-full py-1 text-xs text-slate-300 select-none" title="Sin datos capturados aún">—</span></td>
+                                                            </>
+                                                        )}
                                                     </React.Fragment>
                                                 );
                                             })}
-                                            {ACC_COLS.map(c => <td key={c.key} className="p-0 text-center bg-slate-100"><button onClick={() => openTotalsDetail('acc', c.key)} className="cell-btn w-full h-full py-1 text-xs text-slate-800">{matrix.totals.acc[c.key]}</button></td>)}
+                                            {(() => {
+                                                const anyDataToday = matrix.rows.some(r => r.shiftsData.some(sd => sd.list.length > 0));
+                                                return ACC_COLS.map(c => (
+                                                    <td key={c.key} className="p-0 text-center bg-slate-100">
+                                                        {anyDataToday
+                                                            ? <button onClick={() => openTotalsDetail('acc', c.key)} className="cell-btn w-full h-full py-1 text-xs text-slate-800">{matrix.totals.acc[c.key]}</button>
+                                                            : <span className="block w-full h-full py-1 text-xs text-slate-300 select-none" title="Sin datos capturados aún">—</span>}
+                                                    </td>
+                                                ));
+                                            })()}
                                         </tr>
                                     </tbody>
                                 </table>
                             </div>
-                            <p className="text-[11px] text-slate-400 mt-3 flex items-center gap-1.5"><Icons.Info /> Haz clic en cualquier celda para ver el detalle de las incidencias que la componen. Celdas en verde = sin novedad, en rosa = con incidencias.</p>
+                            <p className="text-[11px] text-slate-400 mt-3 flex items-center gap-1.5"><Icons.Info /> Haz clic en cualquier celda para ver el detalle de las incidencias que la componen. Celdas en verde = sin novedad, en rosa = con incidencias, "—" = sin reporte capturado aún.</p>
                             <p className="text-[11px] text-slate-400 mt-1 flex items-center gap-1.5"><Icons.AlertOctagon /> A = Accidente grave · B = Accidente moderado · C = Falla mecánica.</p>
                             </div>
                         </div>
@@ -785,40 +845,44 @@
                             <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
                                 <h3 className="text-lg font-bold text-slate-700 flex items-center gap-2"><span className="bg-slate-200 p-1 rounded"><Icons.BarChart2 /></span> Tendencias semanales</h3>
                                 <div className="flex items-center gap-2 flex-wrap">
-                                    <div className="flex items-center bg-white border border-slate-200 rounded overflow-hidden text-sm">
-                                        <button onClick={() => shiftWeek(-1)} className="px-2 py-1.5 hover:bg-slate-100 text-slate-500"><Icons.ChevronLeft /></button>
-                                        <span className="px-2 text-xs font-semibold text-slate-600 whitespace-nowrap">{trendWeek.label}</span>
-                                        <button onClick={() => shiftWeek(1)} className="px-2 py-1.5 hover:bg-slate-100 text-slate-500"><Icons.ChevronRight /></button>
+                                    <div className="flex items-center bg-white border border-slate-200 rounded overflow-hidden text-xs">
+                                        <span className="pl-2.5 pr-1 text-slate-400">Del</span>
+                                        <input type="date" value={weekRangeStart} onChange={e => setWeekRangeStart(e.target.value)} className="px-1 py-1.5 text-xs outline-none" />
+                                        <span className="px-1 text-slate-400">al</span>
+                                        <input type="date" value={weekRangeEnd} onChange={e => setWeekRangeEnd(e.target.value)} className="px-1 py-1.5 text-xs outline-none" />
                                     </div>
-                                    <button onClick={resetWeek} className="bg-white border border-slate-200 hover:bg-slate-100 px-3 py-1.5 rounded text-xs text-slate-500 font-semibold">Esta semana</button>
+                                    <button onClick={resetWeekRange} className="bg-white border border-slate-200 hover:bg-slate-100 px-3 py-1.5 rounded text-xs text-slate-500 font-semibold">Semana actual</button>
                                 </div>
                             </div>
+                            <p className="text-[11px] text-slate-400 -mt-2.5 mb-3">{trendWeek.label} · {trendWeek.days.length} día(s)</p>
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-                                <MultiTrendLine title="Arranques fuera de tiempo" icon={Icons.Clock} metricKey="arranques" days={trendWeek.days} plants={plantsToShow} colorSingle="#0284c7" />
-                                <MultiTrendLine title="Llegadas fuera de tiempo" icon={Icons.AlertOctagon} metricKey="llegadas" days={trendWeek.days} plants={plantsToShow} colorSingle="#e11d48" />
-                                <MultiTrendLine title="Percances" icon={Icons.Activity} metricKey="accidents" days={trendWeek.days} plants={plantsToShow} colorSingle="#ea580c" />
-                                <MultiTrendLine title="Fallas Mecánicas" icon={Icons.Wrench} metricKey="mech" days={trendWeek.days} plants={plantsToShow} colorSingle="#7c3aed" />
+                                <MultiTrendLine title="Arranques fuera de tiempo" icon={Icons.Clock} metricKey="arranques" days={trendWeek.days} plants={plantsToShow} colorSingle="#0284c7" compact={trendWeek.days.length > 12} />
+                                <MultiTrendLine title="Llegadas fuera de tiempo" icon={Icons.AlertOctagon} metricKey="llegadas" days={trendWeek.days} plants={plantsToShow} colorSingle="#e11d48" compact={trendWeek.days.length > 12} />
+                                <MultiTrendLine title="Percances" icon={Icons.Activity} metricKey="accidents" days={trendWeek.days} plants={plantsToShow} colorSingle="#ea580c" compact={trendWeek.days.length > 12} />
+                                <MultiTrendLine title="Fallas Mecánicas" icon={Icons.Wrench} metricKey="mech" days={trendWeek.days} plants={plantsToShow} colorSingle="#7c3aed" compact={trendWeek.days.length > 12} />
                             </div>
                         </div>
 
-                        {/* TENDENCIAS MENSUALES (filtro de mes independiente al de la matriz; respeta el filtro de planta) */}
+                        {/* TENDENCIAS MENSUALES (rango de fecha independiente al de la matriz; respeta el filtro de planta) */}
                         <div>
                             <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
                                 <h3 className="text-lg font-bold text-slate-700 flex items-center gap-2"><span className="bg-slate-200 p-1 rounded"><Icons.BarChart2 /></span> Tendencias mensuales <span className="text-[11px] font-normal text-slate-400">(agrupado por semana)</span></h3>
                                 <div className="flex items-center gap-2 flex-wrap">
-                                    <div className="flex items-center bg-white border border-slate-200 rounded overflow-hidden text-sm">
-                                        <button onClick={() => shiftMonth(-1)} className="px-2 py-1.5 hover:bg-slate-100 text-slate-500"><Icons.ChevronLeft /></button>
-                                        <span className="px-2 text-xs font-semibold text-slate-600 whitespace-nowrap">{trendMonth.label}</span>
-                                        <button onClick={() => shiftMonth(1)} className="px-2 py-1.5 hover:bg-slate-100 text-slate-500"><Icons.ChevronRight /></button>
+                                    <div className="flex items-center bg-white border border-slate-200 rounded overflow-hidden text-xs">
+                                        <span className="pl-2.5 pr-1 text-slate-400">Del</span>
+                                        <input type="date" value={monthRangeStart} onChange={e => setMonthRangeStart(e.target.value)} className="px-1 py-1.5 text-xs outline-none" />
+                                        <span className="px-1 text-slate-400">al</span>
+                                        <input type="date" value={monthRangeEnd} onChange={e => setMonthRangeEnd(e.target.value)} className="px-1 py-1.5 text-xs outline-none" />
                                     </div>
-                                    <button onClick={resetMonth} className="bg-white border border-slate-200 hover:bg-slate-100 px-3 py-1.5 rounded text-xs text-slate-500 font-semibold">Este mes</button>
+                                    <button onClick={resetMonthRange} className="bg-white border border-slate-200 hover:bg-slate-100 px-3 py-1.5 rounded text-xs text-slate-500 font-semibold">Mes actual</button>
                                 </div>
                             </div>
+                            <p className="text-[11px] text-slate-400 -mt-2.5 mb-3">{trendMonth.label} · {trendMonth.days.length} semana(s)</p>
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-                                <MultiTrendLine title="Arranques fuera de tiempo" icon={Icons.Clock} metricKey="arranques" days={trendMonth.days} plants={plantsToShow} colorSingle="#0284c7" />
-                                <MultiTrendLine title="Llegadas fuera de tiempo" icon={Icons.AlertOctagon} metricKey="llegadas" days={trendMonth.days} plants={plantsToShow} colorSingle="#e11d48" />
-                                <MultiTrendLine title="Percances" icon={Icons.Activity} metricKey="accidents" days={trendMonth.days} plants={plantsToShow} colorSingle="#ea580c" />
-                                <MultiTrendLine title="Fallas Mecánicas" icon={Icons.Wrench} metricKey="mech" days={trendMonth.days} plants={plantsToShow} colorSingle="#7c3aed" />
+                                <MultiTrendLine title="Arranques fuera de tiempo" icon={Icons.Clock} metricKey="arranques" days={trendMonth.days} plants={plantsToShow} colorSingle="#0284c7" compact={trendMonth.days.length > 12} />
+                                <MultiTrendLine title="Llegadas fuera de tiempo" icon={Icons.AlertOctagon} metricKey="llegadas" days={trendMonth.days} plants={plantsToShow} colorSingle="#e11d48" compact={trendMonth.days.length > 12} />
+                                <MultiTrendLine title="Percances" icon={Icons.Activity} metricKey="accidents" days={trendMonth.days} plants={plantsToShow} colorSingle="#ea580c" compact={trendMonth.days.length > 12} />
+                                <MultiTrendLine title="Fallas Mecánicas" icon={Icons.Wrench} metricKey="mech" days={trendMonth.days} plants={plantsToShow} colorSingle="#7c3aed" compact={trendMonth.days.length > 12} />
                             </div>
                         </div>
                     </main>
