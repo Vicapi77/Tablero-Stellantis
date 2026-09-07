@@ -46,6 +46,7 @@
             Truck: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="16" height="13" x="1" y="5" rx="2" /><polygon points="16 8 20 8 23 11 23 16 16 16 16 8" /><circle cx="5.5" cy="18.5" r="2.5" /><circle cx="18.5" cy="18.5" r="2.5" /></svg>,
             X: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>,
             BarChart2: () => <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" x2="18" y1="20" y2="10"/><line x1="12" x2="12" y1="20" y2="4"/><line x1="6" x2="6" y1="20" y2="14"/></svg>,
+            PieChart: () => <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg>,
             Clock: () => <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>,
             AlertOctagon: () => <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>,
             Activity: () => <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>,
@@ -114,11 +115,17 @@
             ['causeNoImpCrashNoResp', 'Percance S/R'], ['causeNoImpTrain', 'Tren'], ['causeNoImpVandalism', 'Vandalismo'], ['causeNoImpOvercapacity', 'Sobreaforo'],
             ['causeNoImpPublicEvent', 'Evento Público'], ['causeNoImpProtest', 'Manifestación'], ['causeNoImpPublicWork', 'Obra Pública'], ['causeNoImpThirdPartyCrash', 'Acc. Terceros']
         ];
+        // Paleta fija para las hasta 6 causas principales del resumen semanal (pastel + barras apiladas);
+        // "Otras causas" siempre usa el gris neutro, sin importar en qué posición caiga.
+        const CAUSE_COLORS = ['#0284c7', '#f59e0b', '#10b981', '#e11d48', '#7c3aed', '#ea580c'];
+        const CAUSE_OTHER_COLOR = '#94a3b8';
 
         // --- HELPERS DE FECHA (evitando corrimientos por zona horaria) ---
         const pad2 = n => n.toString().padStart(2, '0');
         const isoToParts = iso => { const [y, m, d] = iso.split('-').map(Number); return { y, m, d }; };
         const isoToDMY = iso => { const { y, m, d } = isoToParts(iso); return `${pad2(d)}/${pad2(m)}/${y.toString().slice(-2)}`; };
+        // Convierte una fecha "dd/mm/yy" (como se guardan los incidentes) a ISO "yyyy-mm-dd" para comparar rangos.
+        const dmyToIso = dmy => { const [d, m, y] = dmy.split('/'); return `20${y}-${m}-${d}`; };
         const isoAddDays = (iso, delta) => {
             const { y, m, d } = isoToParts(iso);
             const dt = new Date(Date.UTC(y, m - 1, d));
@@ -230,6 +237,168 @@
                             <b className="text-slate-600">{days[hoverIdx].dayName} {days[hoverIdx].date}:</b> {series.map(s => `${multi ? s.code + ' ' : ''}${s.values[hoverIdx]}${suffix}`).join(' · ')}
                         </p>
                     )}
+                </div>
+            );
+        };
+
+        // --- GRÁFICA DE BARRAS AGRUPADAS POR PLANTA (2 métricas, una barra de cada una por planta) ---
+        const GroupedBarChart = ({ title, icon: Icon, data, seriesAKey, seriesALabel, colorA, seriesBKey, seriesBLabel, colorB, suffix = '' }) => {
+            const width = 620; const height = 170; const marginTop = 18; const marginBottom = 34; const marginL = 30; const marginR = 14;
+            const [hover, setHover] = useState(null); // { idx, s: 'A' | 'B' }
+            const maxVal = Math.max(1, ...data.flatMap(d => [d[seriesAKey], d[seriesBKey]]));
+            const domainMax = maxVal * 1.15;
+            const plotH = height - marginTop - marginBottom;
+            const yAt = v => height - marginBottom - (v / domainMax) * plotH;
+            const n = Math.max(1, data.length);
+            const slotW = (width - marginL - marginR) / n;
+            const barW = Math.min(26, slotW * 0.32);
+            const yTicks = [0, 0.25, 0.5, 0.75, 1].map(f => ({ y: marginTop + f * plotH, value: Math.round(domainMax * (1 - f)) }));
+            return (
+                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                    <div className="flex items-center justify-between mb-1 flex-wrap gap-1.5">
+                        <h5 className="text-xs font-bold text-slate-600 uppercase tracking-wider flex items-center gap-1.5">{Icon && <span className="text-slate-500"><Icon /></span>}{title}</h5>
+                        <div className="flex items-center gap-3">
+                            <span className="flex items-center gap-1 text-[9px] font-semibold text-slate-500"><span className="w-2 h-2 rounded-full inline-block" style={{ backgroundColor: colorA }}></span>{seriesALabel}</span>
+                            <span className="flex items-center gap-1 text-[9px] font-semibold text-slate-500"><span className="w-2 h-2 rounded-full inline-block" style={{ backgroundColor: colorB }}></span>{seriesBLabel}</span>
+                        </div>
+                    </div>
+                    <div className="relative w-full flex justify-center">
+                        <svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} className="overflow-visible">
+                            {yTicks.map((t, i) => <line key={i} x1={marginL} x2={width - marginR} y1={t.y} y2={t.y} stroke="#f1f5f9" strokeWidth="1" />)}
+                            <line x1={marginL} x2={marginL} y1={marginTop} y2={height - marginBottom} stroke="#cbd5e1" strokeWidth="1" />
+                            {yTicks.map((t, i) => (i === 0 || t.value !== yTicks[i - 1].value) && <text key={i} x={marginL - 5} y={t.y + 3} textAnchor="end" fontSize="8.5" fill="#94a3b8">{t.value}</text>)}
+                            {data.map((d, i) => {
+                                const cx = marginL + slotW * i + slotW / 2;
+                                const ax = cx - barW - 2, bx = cx + 2;
+                                const ay = yAt(d[seriesAKey]), by = yAt(d[seriesBKey]);
+                                const base = height - marginBottom;
+                                return (
+                                    <g key={d.code}>
+                                        <rect x={ax} y={ay} width={barW} height={Math.max(0, base - ay)} rx="2" fill={colorA}
+                                            stroke={hover && hover.idx === i && hover.s === 'A' ? '#0f172a' : 'none'} strokeWidth="1.5"
+                                            onMouseEnter={() => setHover({ idx: i, s: 'A' })} onMouseLeave={() => setHover(null)} style={{ cursor: 'pointer' }} />
+                                        <rect x={bx} y={by} width={barW} height={Math.max(0, base - by)} rx="2" fill={colorB}
+                                            stroke={hover && hover.idx === i && hover.s === 'B' ? '#0f172a' : 'none'} strokeWidth="1.5"
+                                            onMouseEnter={() => setHover({ idx: i, s: 'B' })} onMouseLeave={() => setHover(null)} style={{ cursor: 'pointer' }} />
+                                        <text x={cx} y={height - marginBottom + 14} textAnchor="middle" fontSize="9.5" fill="#94a3b8">{d.code}</text>
+                                    </g>
+                                );
+                            })}
+                        </svg>
+                    </div>
+                    {hover && (
+                        <p className="text-[10px] text-slate-500 text-center mt-1 border-t border-slate-100 pt-1.5">
+                            <b className="text-slate-600">{data[hover.idx].plant}:</b> {seriesALabel} {data[hover.idx][seriesAKey]}{suffix} · {seriesBLabel} {data[hover.idx][seriesBKey]}{suffix}
+                        </p>
+                    )}
+                </div>
+            );
+        };
+
+        // --- GRÁFICA DE PASTEL (distribución por categoría, con leyenda directa) ---
+        const PieChart = ({ title, icon: Icon, data, suffix = '' }) => {
+            const size = 170; const cx = size / 2; const cy = size / 2; const r = 62;
+            const total = data.reduce((s, d) => s + d.value, 0);
+            const [hoverIdx, setHoverIdx] = useState(null);
+            let angle = -90;
+            const toXY = (a, radius) => [cx + radius * Math.cos(a * Math.PI / 180), cy + radius * Math.sin(a * Math.PI / 180)];
+            const slices = total === 0 ? [] : data.map((d, i) => {
+                const frac = d.value / total;
+                const startAngle = angle;
+                const endAngle = angle + frac * 360;
+                angle = endAngle;
+                const large = (endAngle - startAngle) > 180 ? 1 : 0;
+                const outerR = hoverIdx === i ? r + 4 : r;
+                const [x1, y1] = toXY(startAngle, outerR);
+                const [x2, y2] = toXY(endAngle, outerR);
+                const path = frac >= 0.999
+                    ? `M ${cx} ${cy - outerR} A ${outerR} ${outerR} 0 1 1 ${cx - 0.01} ${cy - outerR} Z`
+                    : `M ${cx} ${cy} L ${x1} ${y1} A ${outerR} ${outerR} 0 ${large} 1 ${x2} ${y2} Z`;
+                return { ...d, path, pct: frac * 100 };
+            });
+            return (
+                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                    <h5 className="text-xs font-bold text-slate-600 uppercase tracking-wider flex items-center gap-1.5 mb-3">{Icon && <span className="text-slate-500"><Icon /></span>}{title}</h5>
+                    {total === 0 ? (
+                        <p className="text-[11px] text-slate-400 py-8 text-center">Sin llegadas tarde con causa capturada en el rango seleccionado.</p>
+                    ) : (
+                        <div className="flex items-center gap-4 flex-wrap">
+                            <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="shrink-0 overflow-visible">
+                                {slices.map((s, i) => (
+                                    <path key={s.key} d={s.path} fill={s.color} stroke="#fff" strokeWidth="2"
+                                        onMouseEnter={() => setHoverIdx(i)} onMouseLeave={() => setHoverIdx(null)} style={{ cursor: 'pointer' }}>
+                                        <title>{`${s.label}: ${s.value}${suffix} (${s.pct.toFixed(1)}%)`}</title>
+                                    </path>
+                                ))}
+                            </svg>
+                            <div className="flex-1 min-w-[150px] space-y-1">
+                                {slices.map((s, i) => (
+                                    <div key={s.key} onMouseEnter={() => setHoverIdx(i)} onMouseLeave={() => setHoverIdx(null)}
+                                        className={`flex items-center justify-between gap-2 text-[10px] px-1 py-0.5 rounded ${hoverIdx === i ? 'bg-slate-50' : ''}`}>
+                                        <span className="flex items-center gap-1.5 text-slate-600"><span className="w-2 h-2 rounded-full inline-block shrink-0" style={{ backgroundColor: s.color }}></span>{s.label}</span>
+                                        <span className="font-bold text-slate-700 whitespace-nowrap">{s.value} <span className="text-slate-400 font-normal">({s.pct.toFixed(0)}%)</span></span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // --- GRÁFICA DE BARRAS APILADAS POR PLANTA (desglose por causa) ---
+        const StackedBarChart = ({ title, icon: Icon, data, legend, suffix = '' }) => {
+            const width = 620; const height = 190; const marginTop = 18; const marginBottom = 34; const marginL = 30; const marginR = 14;
+            const [hover, setHover] = useState(null); // { plantIdx, segKey }
+            const maxTotal = Math.max(1, ...data.map(d => d.total));
+            const domainMax = maxTotal * 1.15;
+            const plotH = height - marginTop - marginBottom;
+            const yAt = v => height - marginBottom - (v / domainMax) * plotH;
+            const n = Math.max(1, data.length);
+            const slotW = (width - marginL - marginR) / n;
+            const barW = Math.min(46, slotW * 0.5);
+            const yTicks = [0, 0.25, 0.5, 0.75, 1].map(f => ({ y: marginTop + f * plotH, value: Math.round(domainMax * (1 - f)) }));
+            const anyData = data.some(d => d.total > 0);
+            return (
+                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                    <h5 className="text-xs font-bold text-slate-600 uppercase tracking-wider flex items-center gap-1.5 mb-1.5">{Icon && <span className="text-slate-500"><Icon /></span>}{title}</h5>
+                    <div className="flex flex-wrap gap-x-2.5 gap-y-1 mb-2">
+                        {legend.map(l => <span key={l.key} className="flex items-center gap-1 text-[9px] font-semibold text-slate-500"><span className="w-2 h-2 rounded-full inline-block" style={{ backgroundColor: l.color }}></span>{l.label}</span>)}
+                    </div>
+                    {!anyData ? (
+                        <p className="text-[11px] text-slate-400 py-8 text-center">Sin llegadas tarde con causa capturada en el rango seleccionado.</p>
+                    ) : (
+                        <div className="relative w-full flex justify-center">
+                            <svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} className="overflow-visible">
+                                {yTicks.map((t, i) => <line key={i} x1={marginL} x2={width - marginR} y1={t.y} y2={t.y} stroke="#f1f5f9" strokeWidth="1" />)}
+                                <line x1={marginL} x2={marginL} y1={marginTop} y2={height - marginBottom} stroke="#cbd5e1" strokeWidth="1" />
+                                {yTicks.map((t, i) => (i === 0 || t.value !== yTicks[i - 1].value) && <text key={i} x={marginL - 5} y={t.y + 3} textAnchor="end" fontSize="8.5" fill="#94a3b8">{t.value}</text>)}
+                                {data.map((d, i) => {
+                                    const cx = marginL + slotW * i + slotW / 2;
+                                    const x = cx - barW / 2;
+                                    let cum = 0;
+                                    return (
+                                        <g key={d.code}>
+                                            {d.segs.filter(s => s.value > 0).map(s => {
+                                                const y0 = yAt(cum); cum += s.value; const y1 = yAt(cum);
+                                                const isHover = hover && hover.plantIdx === i && hover.segKey === s.key;
+                                                return (
+                                                    <rect key={s.key} x={x} y={y1} width={barW} height={Math.max(0, y0 - y1 - 2)} fill={s.color}
+                                                        stroke={isHover ? '#0f172a' : 'none'} strokeWidth="1.5"
+                                                        onMouseEnter={() => setHover({ plantIdx: i, segKey: s.key })} onMouseLeave={() => setHover(null)} style={{ cursor: 'pointer' }} />
+                                                );
+                                            })}
+                                            <text x={cx} y={height - marginBottom + 14} textAnchor="middle" fontSize="9.5" fill="#94a3b8">{d.code}</text>
+                                        </g>
+                                    );
+                                })}
+                            </svg>
+                        </div>
+                    )}
+                    {hover && (() => {
+                        const d = data[hover.plantIdx]; const s = d.segs.find(x => x.key === hover.segKey);
+                        return <p className="text-[10px] text-slate-500 text-center mt-1 border-t border-slate-100 pt-1.5"><b className="text-slate-600">{d.plant} · {s.label}:</b> {s.value}{suffix} de {d.total}{suffix} total</p>;
+                    })()}
                 </div>
             );
         };
@@ -473,6 +642,61 @@
                 }
                 return { days, label: `${isoShortDayMonth(start)} – ${isoShortDayMonth(end)} ${isoToParts(end).y}` };
             }, [incidents, weekRangeStart, weekRangeEnd]);
+
+            // ---- RESUMEN SEMANAL (mismo rango que "Tendencias semanales"; totales y desglose por planta) ----
+            const weekSummary = useMemo(() => {
+                const perPlant = plantsToShow.map(p => {
+                    const totals = trendWeek.days.reduce((acc, d) => {
+                        const v = (d.perPlant && d.perPlant[p.plant]) || { arranques: 0, llegadas: 0, accidents: 0, mech: 0 };
+                        acc.arranques += v.arranques; acc.llegadas += v.llegadas; acc.accidents += v.accidents; acc.mech += v.mech;
+                        return acc;
+                    }, { arranques: 0, llegadas: 0, accidents: 0, mech: 0 });
+                    return { code: p.code, plant: p.plant, color: p.color, ...totals };
+                });
+                const totals = perPlant.reduce((acc, p) => ({
+                    arranques: acc.arranques + p.arranques, llegadas: acc.llegadas + p.llegadas,
+                    accidents: acc.accidents + p.accidents, mech: acc.mech + p.mech
+                }), { arranques: 0, llegadas: 0, accidents: 0, mech: 0 });
+                return { perPlant, totals };
+            }, [trendWeek, plantsToShow]);
+
+            // ---- CAUSAS DE LLEGADAS TARDE DE LA SEMANA (top 6 causas + "Otras"; mismo rango y filtro de planta) ----
+            const weekCauseSummary = useMemo(() => {
+                let start = weekRangeStart, end = weekRangeEnd;
+                if (!start || !end) return { pieData: [], byPlant: [], legend: [] };
+                if (end < start) { const t = start; start = end; end = t; }
+                const plantSet = new Set(plantsToShow.map(p => p.plant));
+                const relevant = incidents.filter(i => {
+                    if (!i.date || !plantSet.has(i.plant)) return false;
+                    const iso = dmyToIso(i.date);
+                    return iso >= start && iso <= end;
+                });
+                const allCauses = [...CAUSE_LABELS_IMP, ...CAUSE_LABELS_NOIMP];
+                const causeTotals = allCauses
+                    .map(([key, label]) => ({ key, label, value: relevant.reduce((s, i) => s + (i[key] || 0), 0) }))
+                    .filter(c => c.value > 0)
+                    .sort((a, b) => b.value - a.value);
+
+                const TOP_N = 6;
+                const top = causeTotals.slice(0, TOP_N).map((c, i) => ({ ...c, color: CAUSE_COLORS[i % CAUSE_COLORS.length] }));
+                const topKeys = new Set(top.map(c => c.key));
+                const restTotal = causeTotals.filter(c => !topKeys.has(c.key)).reduce((s, c) => s + c.value, 0);
+                const legend = restTotal > 0 ? [...top, { key: '__other', label: 'Otras causas', value: restTotal, color: CAUSE_OTHER_COLOR }] : top;
+
+                const byPlant = plantsToShow.map(p => {
+                    const plantIncidents = relevant.filter(i => i.plant === p.plant);
+                    const segs = legend.map(l => ({
+                        key: l.key, label: l.label, color: l.color,
+                        value: l.key === '__other'
+                            ? allCauses.filter(([k]) => !topKeys.has(k)).reduce((s, [k]) => s + plantIncidents.reduce((s2, i) => s2 + (i[k] || 0), 0), 0)
+                            : plantIncidents.reduce((s, i) => s + (i[l.key] || 0), 0)
+                    }));
+                    const total = segs.reduce((s, x) => s + x.value, 0);
+                    return { code: p.code, plant: p.plant, segs, total };
+                });
+
+                return { pieData: legend, byPlant, legend };
+            }, [incidents, weekRangeStart, weekRangeEnd, plantsToShow]);
 
             // ---- TENDENCIA MENSUAL (un punto por semana lunes-domingo entre la fecha de inicio y fin elegidas; rango independiente del de la matriz) ----
             const trendMonth = useMemo(() => {
@@ -837,6 +1061,32 @@
                             </div>
                             <p className="text-[11px] text-slate-400 mt-3 flex items-center gap-1.5"><Icons.Info /> Haz clic en cualquier celda para ver el detalle de las incidencias que la componen. Celdas en verde = sin novedad, en rosa = con incidencias, "—" = sin reporte capturado aún.</p>
                             <p className="text-[11px] text-slate-400 mt-1 flex items-center gap-1.5"><Icons.AlertOctagon /> A = Accidente grave · B = Accidente moderado · C = Falla mecánica.</p>
+                            </div>
+                        </div>
+
+                        {/* RESUMEN SEMANAL (mismo rango de fecha que el filtro de "Tendencias semanales", justo abajo; respeta el filtro de planta) */}
+                        <div>
+                            <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
+                                <h3 className="text-lg font-bold text-slate-700 flex items-center gap-2"><span className="bg-slate-200 p-1 rounded"><Icons.Layers /></span> Resumen semanal</h3>
+                                <p className="text-[11px] text-slate-400">{trendWeek.label} · {selectedPlant === 'Todas' ? 'Todas las áreas' : selectedPlant}</p>
+                            </div>
+                            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-5">
+                                <StatCard title="Arranques fuera de tiempo" value={weekSummary.totals.arranques} icon={Icons.Clock} color="#0284c7" />
+                                <StatCard title="Llegadas tarde" value={weekSummary.totals.llegadas} icon={Icons.AlertOctagon} color="#e11d48" />
+                                <StatCard title="Fallas mecánicas" value={weekSummary.totals.mech} icon={Icons.Wrench} color="#7c3aed" />
+                                <StatCard title="Percances" value={weekSummary.totals.accidents} icon={Icons.Activity} color="#ea580c" />
+                            </div>
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
+                                <GroupedBarChart title="Arranques y llegadas tarde por planta" icon={Icons.BarChart2}
+                                    data={weekSummary.perPlant} seriesAKey="arranques" seriesALabel="Arranques" colorA="#0284c7"
+                                    seriesBKey="llegadas" seriesBLabel="Llegadas tarde" colorB="#e11d48" />
+                                <GroupedBarChart title="Fallas mecánicas y percances por planta" icon={Icons.BarChart2}
+                                    data={weekSummary.perPlant} seriesAKey="mech" seriesALabel="Fallas mecánicas" colorA="#7c3aed"
+                                    seriesBKey="accidents" seriesBLabel="Percances" colorB="#ea580c" />
+                            </div>
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                                <PieChart title="Causas de llegadas tarde" icon={Icons.PieChart} data={weekCauseSummary.pieData} />
+                                <StackedBarChart title="Causas de llegadas tarde por planta" icon={Icons.Layers} data={weekCauseSummary.byPlant} legend={weekCauseSummary.legend} />
                             </div>
                         </div>
 
