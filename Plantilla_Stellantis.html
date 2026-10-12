@@ -143,6 +143,7 @@
         const STATUS_META = {
             vigente: { label: 'Vigente', color: '#10b981' },
             porVencer: { label: 'Por vencer', color: '#f59e0b' },
+            cargada: { label: 'Cargada sin vigencia', color: '#0ea5e9' },
             vencida: { label: 'Vencida', color: '#e11d48' },
             sin: { label: 'Sin registro', color: '#94a3b8' },
         };
@@ -156,6 +157,12 @@
             if (diffDays <= DOC_WARNING_DAYS) return { key: 'porVencer', ...STATUS_META.porVencer };
             return { key: 'vigente', ...STATUS_META.vigente };
         };
+        // Estado real del documento: si tiene fecha de vigencia manda la fecha; si sólo tiene la imagen cargada,
+        // cuenta como "Cargada sin vigencia" (cumple); sin imagen ni fecha = "Sin registro".
+        const docStatusOf = (url, dateStr) => dateStr ? docStatus(dateStr) : url ? { key: 'cargada', ...STATUS_META.cargada } : { key: 'sin', ...STATUS_META.sin };
+        const licSt = e => docStatusOf(e.licenciaUrl, e.licenciaVigencia);
+        const exaSt = e => docStatusOf(e.examenUrl, e.examenVigencia);
+        const CUMPLE_KEYS = ['vigente', 'porVencer', 'cargada'];
         const completionColor = (pct) => {
             if (pct === null || pct === undefined) return '#94a3b8';
             if (pct >= 90) return '#10b981';
@@ -268,11 +275,24 @@
             );
         };
 
+        // --- CUMPLIMIENTO DE DOCUMENTOS (licencia y examen médico se miden por separado) ---
+        // Cumple = imagen cargada o vigencia capturada, y que no esté vencida hoy ("Por vencer" sigue contando).
+        // Sólo operadores activos: el personal con status BAJA no cuenta.
+        const isActiveStaff = e => (e.status || '').toString().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim() !== 'BAJA';
+        const DOC_GET = { licencia: licSt, examen: exaSt };
+        const docCumple = (e, kind) => CUMPLE_KEYS.includes(DOC_GET[kind](e).key);
+        const docCompliance = (list, kind) => {
+            const act = list.filter(isActiveStaff);
+            const ok = act.filter(e => docCumple(e, kind)).length;
+            return { total: act.length, ok, pct: act.length ? ok / act.length * 100 : null };
+        };
+        const fmtPctDoc = p => p === null || p === undefined ? '—' : (p >= 99.95 || p === 0 ? p.toFixed(0) : p.toFixed(1)) + '%';
+
         // --- TARJETA KPI ---
-        const StatCard = ({ title, value, suffix = '', icon: Icon, color }) => (
+        const StatCard = ({ title, value, suffix = '', icon: Icon, color, sub }) => (
             <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-3">
                 <div className="p-2.5 rounded-lg shrink-0" style={{ backgroundColor: color + '1a', color }}><Icon /></div>
-                <div className="min-w-0"><p className="text-[11px] text-slate-500 font-medium leading-tight truncate">{title}</p><p className="text-xl font-bold text-slate-800 leading-tight">{value}<span className="text-sm text-slate-400 ml-0.5">{suffix}</span></p></div>
+                <div className="min-w-0"><p className="text-[11px] text-slate-500 font-medium leading-tight">{title}</p><p className="text-xl font-bold text-slate-800 leading-tight">{value}<span className="text-sm text-slate-400 ml-0.5">{suffix}</span></p>{sub && <p className="text-[10px] text-slate-400 leading-tight">{sub}</p>}</div>
             </div>
         );
 
@@ -473,8 +493,8 @@
                 setSaving(false);
             };
 
-            const licStatus = docStatus(form.licenciaVigencia);
-            const examStatus = docStatus(form.examenVigencia);
+            const licStatus = docStatusOf(docs.licenciaUrl, form.licenciaVigencia);
+            const examStatus = docStatusOf(docs.examenUrl, form.examenVigencia);
 
             return (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -553,8 +573,8 @@
             ];
             if (showPlant) cols.push({ key: 'plant', label: 'Planta', get: e => AREA_META[e.plant] ? AREA_META[e.plant].label : (e.plant || '') });
             cols.push({ key: 'status', label: 'Status', get: e => e.status || '' });
-            cols.push({ key: 'licencia', label: 'Licencia', get: e => docStatus(e.licenciaVigencia).label, center: true });
-            cols.push({ key: 'examen', label: 'Examen Médico', get: e => docStatus(e.examenVigencia).label, center: true });
+            cols.push({ key: 'licencia', label: 'Licencia', get: e => licSt(e).label, center: true });
+            cols.push({ key: 'examen', label: 'Examen Médico', get: e => exaSt(e).label, center: true });
             return cols;
         };
         const sortStaff = (list, sort, columns) => {
@@ -568,7 +588,7 @@
             return sorted;
         };
 
-        const STATUS_BADGE = { vigente: 'bg-emerald-50 text-emerald-700', porVencer: 'bg-amber-50 text-amber-700', vencida: 'bg-rose-50 text-rose-700', sin: 'bg-slate-100 text-slate-500' };
+        const STATUS_BADGE = { vigente: 'bg-emerald-50 text-emerald-700', porVencer: 'bg-amber-50 text-amber-700', cargada: 'bg-sky-50 text-sky-700', vencida: 'bg-rose-50 text-rose-700', sin: 'bg-slate-100 text-slate-500' };
 
         // --- TABLA DE PERSONAL (compartida entre el bloque "Personal Stellantis" y cada planta) ---
         const StaffListTable = ({ staff, showPlant, onOpenEmployee }) => {
@@ -592,8 +612,8 @@
                     <tbody className="divide-y">
                         {sorted.length === 0 && <tr><td colSpan={columns.length + 2} className="p-6 text-center text-slate-400">Sin personal que coincida.</td></tr>}
                         {sorted.map(e => {
-                            const lic = docStatus(e.licenciaVigencia);
-                            const exam = docStatus(e.examenVigencia);
+                            const lic = licSt(e);
+                            const exam = exaSt(e);
                             return (
                                 <tr key={e.nomina} className="hover:bg-slate-50 row-btn cursor-pointer" onClick={() => onOpenEmployee(e)}>
                                     <td className="p-3 font-bold text-slate-700">{e.nomina}</td>
@@ -624,8 +644,7 @@
                 const s = search.toLowerCase();
                 return String(e.nomina).includes(s) || (e.nombre || '').toLowerCase().includes(s);
             }), [staff, search]);
-            const completos = staff.filter(e => docStatus(e.licenciaVigencia).key === 'vigente' && docStatus(e.examenVigencia).key === 'vigente').length;
-            const pct = staff.length > 0 ? (completos / staff.length * 100) : null;
+            const licC = docCompliance(staff, 'licencia'), exaC = docCompliance(staff, 'examen');
 
             useEffect(() => { if (search) setOpen(true); }, [search]);
 
@@ -637,7 +656,9 @@
                             <div><p className="font-bold text-slate-800">{meta.code} · {meta.label}</p><p className="text-xs text-slate-400">{staff.length} personas</p></div>
                         </div>
                         <div className="flex items-center gap-3">
-                            <span className="text-xs font-bold px-2.5 py-1 rounded-full" style={{ backgroundColor: completionColor(pct) + '1a', color: completionColor(pct) }}>{pct !== null ? pct.toFixed(0) + '% doc. completa' : 'Sin datos'}</span>
+                            <span className="hidden sm:inline-flex text-xs font-bold px-2.5 py-1 rounded-full" style={{ backgroundColor: completionColor(licC.pct) + '1a', color: completionColor(licC.pct) }} title="Cumplimiento de licencia">Lic. {fmtPctDoc(licC.pct)}</span>
+                            <span className="hidden sm:inline-flex text-xs font-bold px-2.5 py-1 rounded-full" style={{ backgroundColor: completionColor(exaC.pct) + '1a', color: completionColor(exaC.pct) }} title="Cumplimiento de examen médico">Exam. {fmtPctDoc(exaC.pct)}</span>
+                            <span className="sm:hidden text-[11px] font-bold text-slate-500">L {fmtPctDoc(licC.pct)} · E {fmtPctDoc(exaC.pct)}</span>
                             <span className={`text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`}><Icons.ChevronDown /></span>
                         </div>
                     </button>
@@ -661,8 +682,7 @@
                 return String(e.nomina).includes(s) || (e.nombre || '').toLowerCase().includes(s);
             }), [staff, search]);
             useEffect(() => { if (search) setOpen(true); }, [search]);
-            const completos = staff.filter(e => docStatus(e.licenciaVigencia).key === 'vigente' && docStatus(e.examenVigencia).key === 'vigente').length;
-            const pct = staff.length > 0 ? (completos / staff.length * 100) : null;
+            const licC = docCompliance(staff, 'licencia'), exaC = docCompliance(staff, 'examen');
             return (
                 <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
                     <button onClick={() => setOpen(o => !o)} className="w-full flex items-center justify-between p-4 hover:bg-slate-50 text-left">
@@ -671,7 +691,9 @@
                             <div><p className="font-bold text-slate-800">Personal Stellantis</p><p className="text-xs text-slate-400">{staff.length} personas</p></div>
                         </div>
                         <div className="flex items-center gap-3">
-                            <span className="text-xs font-bold px-2.5 py-1 rounded-full" style={{ backgroundColor: completionColor(pct) + '1a', color: completionColor(pct) }}>{pct !== null ? pct.toFixed(0) + '% doc. completa' : 'Sin datos'}</span>
+                            <span className="hidden sm:inline-flex text-xs font-bold px-2.5 py-1 rounded-full" style={{ backgroundColor: completionColor(licC.pct) + '1a', color: completionColor(licC.pct) }} title="Cumplimiento de licencia">Lic. {fmtPctDoc(licC.pct)}</span>
+                            <span className="hidden sm:inline-flex text-xs font-bold px-2.5 py-1 rounded-full" style={{ backgroundColor: completionColor(exaC.pct) + '1a', color: completionColor(exaC.pct) }} title="Cumplimiento de examen médico">Exam. {fmtPctDoc(exaC.pct)}</span>
+                            <span className="sm:hidden text-[11px] font-bold text-slate-500">L {fmtPctDoc(licC.pct)} · E {fmtPctDoc(exaC.pct)}</span>
                             <span className={`text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`}><Icons.ChevronDown /></span>
                         </div>
                     </button>
@@ -913,24 +935,25 @@
                 list.forEach(e => { byPlant[e.plant] = (byPlant[e.plant] || 0) + 1; });
                 const plantData = PLANT_ORDER.map(p => ({ label: AREA_META[p].code, val: byPlant[p] || 0, color: AREA_META[p].color }));
 
-                const licCounts = { vigente: 0, porVencer: 0, vencida: 0, sin: 0 };
-                const examCounts = { vigente: 0, porVencer: 0, vencida: 0, sin: 0 };
-                list.forEach(e => { licCounts[docStatus(e.licenciaVigencia).key]++; examCounts[docStatus(e.examenVigencia).key]++; });
+                const licCounts = { vigente: 0, porVencer: 0, cargada: 0, vencida: 0, sin: 0 };
+                const examCounts = { vigente: 0, porVencer: 0, cargada: 0, vencida: 0, sin: 0 };
+                list.forEach(e => { licCounts[licSt(e).key]++; examCounts[exaSt(e).key]++; });
                 const licenciaData = Object.keys(STATUS_META).map(k => ({ label: STATUS_META[k].label, val: licCounts[k], color: STATUS_META[k].color }));
                 const examenData = Object.keys(STATUS_META).map(k => ({ label: STATUS_META[k].label, val: examCounts[k], color: STATUS_META[k].color }));
 
-                const completos = list.filter(e => docStatus(e.licenciaVigencia).key === 'vigente' && docStatus(e.examenVigencia).key === 'vigente').length;
-                const vencidos = list.filter(e => docStatus(e.licenciaVigencia).key === 'vencida' || docStatus(e.examenVigencia).key === 'vencida').length;
+                const completos = list.filter(e => isActiveStaff(e) && docCumple(e, 'licencia') && docCumple(e, 'examen')).length;
+                const vencidos = list.filter(e => licSt(e).key === 'vencida' || exaSt(e).key === 'vencida').length;
                 const porVencer = list.filter(e => {
-                    const l = docStatus(e.licenciaVigencia).key, x = docStatus(e.examenVigencia).key;
+                    const l = licSt(e).key, x = exaSt(e).key;
                     return (l === 'porVencer' || x === 'porVencer') && l !== 'vencida' && x !== 'vencida';
                 }).length;
                 const sinDocs = list.filter(e => !e.licenciaUrl && !e.examenUrl).length;
 
                 const docCompleteByPlant = PLANT_ORDER.map(p => {
                     const pl = list.filter(e => e.plant === p);
-                    const comp = pl.filter(e => docStatus(e.licenciaVigencia).key === 'vigente' && docStatus(e.examenVigencia).key === 'vigente').length;
-                    const pct = pl.length > 0 ? (comp / pl.length * 100) : null;
+                    const act = pl.filter(isActiveStaff);
+                    const comp = act.filter(e => docCumple(e, 'licencia') && docCumple(e, 'examen')).length;
+                    const pct = act.length > 0 ? (comp / act.length * 100) : null;
                     return { key: p, code: AREA_META[p].code, color: AREA_META[p].color, pct, n: pl.length };
                 });
 
@@ -954,12 +977,15 @@
 
                 const rank = k => k === 'vencida' ? 0 : k === 'porVencer' ? 1 : 2;
                 const topAttention = list.filter(e => {
-                    const l = docStatus(e.licenciaVigencia).key, x = docStatus(e.examenVigencia).key;
+                    const l = licSt(e).key, x = exaSt(e).key;
                     return l === 'vencida' || x === 'vencida' || l === 'porVencer' || x === 'porVencer';
-                }).sort((a, b) => Math.min(rank(docStatus(a.licenciaVigencia).key), rank(docStatus(a.examenVigencia).key)) - Math.min(rank(docStatus(b.licenciaVigencia).key), rank(docStatus(b.examenVigencia).key)))
+                }).sort((a, b) => Math.min(rank(licSt(a).key), rank(exaSt(a).key)) - Math.min(rank(licSt(b).key), rank(exaSt(b).key)))
                     .slice(0, 8);
 
-                return { total, plantData, licenciaData, examenData, completos, vencidos, porVencer, sinDocs, docCompleteByPlant, vencimientosData, topAttention };
+                const licComp = docCompliance(list, 'licencia');
+                const examComp = docCompliance(list, 'examen');
+
+                return { licComp, examComp, total, plantData, licenciaData, examenData, completos, vencidos, porVencer, sinDocs, docCompleteByPlant, vencimientosData, topAttention };
             }, [filteredStaff]);
 
             const openVehicleFromChart = (e) => { setChartDetail(null); setModalEmployee(e); };
@@ -969,7 +995,7 @@
                     title: `Documentación — ${bar.code} (${AREA_META[bar.key].label})`,
                     employees: filteredStaff.filter(e => e.plant === bar.key),
                     metricLabel: 'Licencia / Examen',
-                    metricGet: e => `${docStatus(e.licenciaVigencia).label} / ${docStatus(e.examenVigencia).label}`
+                    metricGet: e => `${licSt(e).label} / ${exaSt(e).label}`
                 });
             };
 
@@ -1062,9 +1088,10 @@
                         )}
 
                         {/* KPIs */}
-                        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+                        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
                             <StatCard title="Total de personal" value={stats.total} icon={Icons.Users} color="#1e293b" />
-                            <StatCard title="Documentación completa" value={stats.completos} icon={Icons.CheckCircle} color="#10b981" />
+                            <StatCard title="Cumplimiento licencia" value={fmtPctDoc(stats.licComp.pct)} sub={`${stats.licComp.ok} de ${stats.licComp.total} operadores`} icon={Icons.IdCard} color={completionColor(stats.licComp.pct)} />
+                            <StatCard title="Cumplimiento examen médico" value={fmtPctDoc(stats.examComp.pct)} sub={`${stats.examComp.ok} de ${stats.examComp.total} operadores`} icon={Icons.HeartPulse} color={completionColor(stats.examComp.pct)} />
                             <StatCard title="Por vencer (≤60 días)" value={stats.porVencer} icon={Icons.Calendar} color="#f59e0b" />
                             <StatCard title="Documentos vencidos" value={stats.vencidos} icon={Icons.AlertTriangle} color="#e11d48" />
                             <StatCard title="Sin documentos cargados" value={stats.sinDocs} icon={Icons.Info} color="#94a3b8" />
@@ -1103,7 +1130,7 @@
                                         <tbody className="divide-y">
                                             {stats.topAttention.length === 0 && <tr><td colSpan="5" className="p-6 text-center text-slate-400">Sin pendientes críticos por el momento.</td></tr>}
                                             {stats.topAttention.map(e => {
-                                                const lic = docStatus(e.licenciaVigencia), exam = docStatus(e.examenVigencia);
+                                                const lic = licSt(e), exam = exaSt(e);
                                                 return (
                                                     <tr key={e.nomina} className="hover:bg-slate-50 cursor-pointer" onClick={() => setModalEmployee(e)}>
                                                         <td className="p-3 font-bold text-slate-700">{e.nomina}</td>
