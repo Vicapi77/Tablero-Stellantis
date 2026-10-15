@@ -467,6 +467,65 @@
             );
         };
 
+        // --- UNIDADES POR TURNO (vista alterna de la matriz) ---
+        // Se capturan diario en el Dashboard de Transporte (Gestionar ▸ Unidades), en la colección "unit_counts"
+        // (un documento por fecha ISO). Los valores base viven en "unit_base/main" y se pueden editar ahí mismo.
+        const UNIT_SHIFTS = ['T1', 'T2', 'T3'];
+        const UNIT_BASE_DEFAULT = {
+            'Camiones': { T1: 59, T2: 55, T3: 55 },
+            'Extensión': { T1: 54, T2: 54, T3: 54 },
+            'Sur': { T1: 16, T2: 16, T3: 16 },
+            'Van': { T1: 38, T2: 38, T3: 9 },
+            'Norte': { T1: 37, T2: 37, T3: 37 },
+        };
+        const unitNum = v => (v === null || v === undefined || v === '') ? null : (isFinite(+v) ? +v : null);
+        const UnitsMatrix = ({ counts, base }) => {
+            const shifts = SHIFTS.filter(s => UNIT_SHIFTS.includes(s.key));
+            const B = (p, k) => unitNum(base && base[p] && base[p][k]) ?? unitNum(UNIT_BASE_DEFAULT[p] && UNIT_BASE_DEFAULT[p][k]) ?? 0;
+            const V = (p, k) => unitNum(counts && counts[p] && counts[p][k]);
+            const cell = (v, b) => {
+                if (v === null) return <td className="p-1 text-center text-xs text-slate-400 bg-slate-50 tabular-nums"><span className="text-slate-300">—</span>/{b}</td>;
+                const ok = v >= b;
+                return <td className={`p-1 text-center text-xs font-bold tabular-nums ${ok ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-100 text-rose-700'}`} title={ok ? 'Completo' : `Faltan ${b - v}`}>{v}/{b}</td>;
+            };
+            // Totales: comparan solo contra la base de los turnos ya capturados (lo no capturado no cuenta como faltante)
+            const tot = cells => { const cap = cells.filter(c => c.v !== null); return cap.length ? { v: cap.reduce((a, c) => a + c.v, 0), b: cap.reduce((a, c) => a + c.b, 0), all: cells.reduce((a, c) => a + c.b, 0) } : { v: null, b: cells.reduce((a, c) => a + c.b, 0) }; };
+            const rowTot = p => tot(shifts.map(s => ({ v: V(p.plant, s.key), b: B(p.plant, s.key) })));
+            const colTot = k => tot(AREA_ROWS.map(p => ({ v: V(p.plant, k), b: B(p.plant, k) })));
+            const grand = tot(AREA_ROWS.flatMap(p => shifts.map(s => ({ v: V(p.plant, s.key), b: B(p.plant, s.key) }))));
+            const pct = t => t.v === null || !t.b ? '' : ` · ${Math.round(t.v / t.b * 100)}%`;
+            return (
+                <div className="overflow-x-auto" data-units-matrix>
+                    <table className="matrix-tbl w-full text-[11px] border-collapse min-w-[520px]">
+                        <thead>
+                            <tr>
+                                <th className="bg-slate-800 text-white p-1.5 sticky left-0 z-10">Área</th>
+                                {shifts.map(sh => <th key={sh.key} className={`p-1.5 font-bold text-[10px] ${sh.head}`}>{sh.label}</th>)}
+                                <th className="bg-slate-900 text-white p-1.5 font-bold text-[10px]">Total del día</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {AREA_ROWS.map(a => {
+                                const t = rowTot(a);
+                                return (
+                                    <tr key={a.code} data-units-row={a.code}>
+                                        <td className="p-1 font-bold text-slate-700 bg-slate-50 sticky left-0 z-10"><div className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full inline-block" style={{ backgroundColor: a.color }}></span>{a.code}</div></td>
+                                        {shifts.map(sh => <React.Fragment key={sh.key}>{cell(V(a.plant, sh.key), B(a.plant, sh.key))}</React.Fragment>)}
+                                        <td className="p-1 text-center text-xs font-bold bg-slate-100 text-slate-800 tabular-nums">{t.v === null ? <span className="text-slate-400 font-normal">—/{t.b}</span> : `${t.v}/${t.b}`}<span className="font-normal text-slate-500">{pct(t)}</span></td>
+                                    </tr>
+                                );
+                            })}
+                            <tr className="font-bold">
+                                <td className="p-1 bg-slate-800 text-white sticky left-0 z-10 text-xs">Total</td>
+                                {shifts.map(sh => { const t = colTot(sh.key); return <td key={sh.key} className="p-1 text-center bg-slate-100 text-xs text-slate-800 tabular-nums">{t.v === null ? <span className="text-slate-400 font-normal">—/{t.b}</span> : `${t.v}/${t.b}`}<span className="font-normal text-slate-500">{pct(t)}</span></td>; })}
+                                <td className="p-1 text-center bg-slate-200 text-xs text-slate-900 tabular-nums" data-units-grand>{grand.v === null ? <span className="text-slate-400 font-normal">—/{grand.b}</span> : `${grand.v}/${grand.b}`}<span className="font-normal text-slate-500">{pct(grand)}</span></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            );
+        };
+
         // --- DASHBOARD PRINCIPAL: MATRIZ DE CUMPLIMIENTO ---
         const MatrixDashboard = () => {
             const [incidents, setIncidents] = useState([]);
@@ -476,6 +535,9 @@
             const [selectedDate, setSelectedDate] = useState(todayISO());
             const [selectedPlant, setSelectedPlant] = useState('Todas');
             const [shiftTypeFilter, setShiftTypeFilter] = useState('Todos');
+            const [matrixView, setMatrixView] = useState('inc'); // 'inc' = incidencias · 'units' = unidades por turno
+            const [unitCounts, setUnitCounts] = useState(null);
+            const [unitBase, setUnitBase] = useState(null);
             const [detailInfo, setDetailInfo] = useState(null);
             const [downloadingImg, setDownloadingImg] = useState(false);
             const [downloadImgError, setDownloadImgError] = useState(false);
@@ -555,6 +617,17 @@
                 return () => { unsub(); unsub2(); };
             }, []);
 
+            // Unidades por turno del día seleccionado (un documento por fecha) y valores base editables
+            useEffect(() => {
+                if (!db) return;
+                return db.collection('unit_base').doc('main').onSnapshot(d => setUnitBase(d.exists ? (d.data().plants || null) : null), e => console.error(e));
+            }, []);
+            useEffect(() => {
+                if (!db) return;
+                setUnitCounts(null);
+                return db.collection('unit_counts').doc(selectedDate).onSnapshot(d => setUnitCounts(d.exists ? (d.data().plants || null) : null), e => console.error(e));
+            }, [selectedDate]);
+
             // Nivel de servicio por fecha+planta: prioriza la colección nueva "daily_metrics"
             // (carga por día) y cae en el valor legado embebido en el incidente si no hay dato nuevo.
             const metricsMap = useMemo(() => {
@@ -575,9 +648,9 @@
                     const areaIncidents = dayIncidents.filter(i => i.plant === area.plant);
                     const shiftsData = SHIFTS.map(sh => {
                         const list = areaIncidents.filter(i => i.shift === sh.key);
-                        // Solo se suman los arranques CON afectación; "sin afectación" se sigue capturando
-                        // y se puede ver desglosado dentro del detalle, pero ya no infla este total.
-                        const arranques = list.reduce((s, i) => s + (i.lateStarts || 0), 0);
+                        // Arranques fuera de tiempo = TODOS los inicios tarde (con y sin afectación);
+                        // el desglose con / sin afectación se ve dentro del detalle de la celda.
+                        const arranques = list.reduce((s, i) => s + (i.lateStarts || 0) + (i.lateStartsNoAff || 0), 0);
                         const llegadas = list.reduce((s, i) => s + (i.imp || 0) + (i.noImp || 0), 0);
                         return { key: sh.key, arranques, llegadas, list };
                     });
@@ -618,7 +691,7 @@
                 AREA_ROWS.forEach(a => {
                     const list = dayIncidents.filter(i => i.plant === a.plant);
                     perPlant[a.plant] = {
-                        arranques: list.reduce((s, i) => s + (i.lateStarts || 0), 0),
+                        arranques: list.reduce((s, i) => s + (i.lateStarts || 0) + (i.lateStartsNoAff || 0), 0),
                         llegadas: list.reduce((s, i) => s + (i.imp || 0) + (i.noImp || 0), 0),
                         accidents: list.reduce((s, i) => s + (i.accidents || 0), 0),
                         mech: list.reduce((s, i) => s + (i.mechanicalFailures || 0), 0),
@@ -734,7 +807,7 @@
 
             const dayStats = useMemo(() => {
                 const list = matrix.dayIncidents;
-                const arranques = list.reduce((s, i) => s + (i.lateStarts || 0), 0);
+                const arranques = list.reduce((s, i) => s + (i.lateStarts || 0) + (i.lateStartsNoAff || 0), 0);
                 const llegadas = list.reduce((s, i) => s + (i.imp || 0) + (i.noImp || 0), 0);
                 const accidents = list.reduce((s, i) => s + (i.accidents || 0), 0);
                 const cruces = AREA_ROWS.length * SHIFTS.length;
@@ -966,11 +1039,16 @@
                             <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
                                 <h3 className="font-bold flex gap-2 items-center"><span className="text-slate-500"><Icons.Table /></span> Matriz diaria por área y turno</h3>
                                 <div className="flex items-center gap-2 flex-wrap">
-                                    <div className="flex items-center bg-slate-100 border border-slate-200 rounded overflow-hidden text-xs">
+                                    <div className="flex items-center bg-slate-100 border border-slate-200 rounded overflow-hidden text-xs" data-matrix-view>
+                                        {[['inc', 'Incidencias'], ['units', 'Unidades']].map(([k, l]) => (
+                                            <button key={k} data-view={k} onClick={() => setMatrixView(k)} className={`px-2.5 py-1.5 font-bold ${matrixView === k ? 'bg-rose-600 text-white' : 'text-slate-500 hover:bg-slate-200'}`}>{l}</button>
+                                        ))}
+                                    </div>
+                                    {matrixView === 'inc' && <div className="flex items-center bg-slate-100 border border-slate-200 rounded overflow-hidden text-xs">
                                         {SHIFT_TYPE_FILTERS.map(opt => (
                                             <button key={opt} onClick={() => setShiftTypeFilter(opt)} className={`px-2.5 py-1.5 font-bold ${shiftTypeFilter === opt ? 'bg-slate-800 text-white' : 'text-slate-500 hover:bg-slate-200'}`}>{opt}</button>
                                         ))}
-                                    </div>
+                                    </div>}
                                     {downloadImgError && <span className="text-[11px] text-red-500">No se pudo generar la imagen</span>}
                                     <button onClick={downloadMatrizImage} disabled={downloadingImg} className="text-xs font-bold bg-slate-800 hover:bg-slate-900 text-white px-3 py-1.5 rounded flex items-center gap-1.5 disabled:opacity-60">
                                         {downloadingImg ? <span className="loader-sm"></span> : <Icons.Download />}Descargar imagen
@@ -980,9 +1058,13 @@
                             <div ref={matrixCaptureRef} data-matrix-capture="true" className="bg-white">
                             <div className="flex items-center gap-2 mb-2">
                                 <span className="text-slate-500"><Icons.Table /></span>
-                                <h4 className="font-bold text-slate-800 text-sm">Matriz diaria por área y turno</h4>
-                                <span className="text-xs text-slate-400">— {isoLongLabel(selectedDate)} · {selectedPlant === 'Todas' ? 'Todas las áreas' : selectedPlant} · {shiftTypeFilter}</span>
+                                <h4 className="font-bold text-slate-800 text-sm">{matrixView === 'units' ? 'Unidades por turno' : 'Matriz diaria por área y turno'}</h4>
+                                <span className="text-xs text-slate-400">— {isoLongLabel(selectedDate)} · {matrixView === 'units' ? 'unidades en servicio / unidades base' : `${selectedPlant === 'Todas' ? 'Todas las áreas' : selectedPlant} · ${shiftTypeFilter}`}</span>
                             </div>
+                            {matrixView === 'units' ? (<>
+                                <UnitsMatrix counts={unitCounts} base={unitBase} />
+                                <p className="text-[11px] text-slate-400 mt-3 flex items-center gap-1.5"><Icons.Info /> Unidades en servicio / unidades base por turno. Verde = completo, rosa = faltan unidades, "—" = sin captura del día. Los totales comparan solo los turnos capturados. Se capturan en el Dashboard de Transporte (Gestionar ▸ Unidades).</p>
+                            </>) : (<>
                             <div ref={matrixScrollRef} data-matrix-scroll="true" className="overflow-x-auto">
                                 <table className={`matrix-tbl w-full text-[11px] border-collapse ${visibleShifts.length > 3 ? 'min-w-[920px]' : 'min-w-[600px]'}`}>
                                     <thead>
@@ -1061,7 +1143,8 @@
                                 </table>
                             </div>
                             <p className="text-[11px] text-slate-400 mt-3 flex items-center gap-1.5"><Icons.Info /> Haz clic en cualquier celda para ver el detalle de las incidencias que la componen. Celdas en verde = sin novedad, en rosa = con incidencias, "—" = sin reporte capturado aún.</p>
-                            <p className="text-[11px] text-slate-400 mt-1 flex items-center gap-1.5"><Icons.AlertOctagon /> A = Accidente grave · B = Accidente moderado · C = Falla mecánica.</p>
+                            <p className="text-[11px] text-slate-400 mt-1 flex items-center gap-1.5"><Icons.AlertOctagon /> A = Accidente grave · B = Accidente moderado · C = Falla mecánica. Arranques = todos los inicios tarde (con y sin afectación).</p>
+                            </>)}
                             </div>
                         </div>
 
