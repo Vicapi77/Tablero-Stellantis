@@ -361,6 +361,7 @@
                             <button onClick={onClose} className="text-slate-300 hover:text-white"><Icons.X /></button>
                         </div>
                         <div className="overflow-y-auto">
+                            {info.header}
                             {info.vehicles.length === 0 ? (
                                 <div className="text-center text-slate-400 text-sm py-10">Sin unidades para este dato.</div>
                             ) : (
@@ -388,10 +389,10 @@
         };
 
         // --- TARJETA KPI ---
-        const StatCard = ({ title, value, suffix = '', icon: Icon, color, onClick }) => (
-            <div onClick={onClick} role={onClick ? 'button' : undefined} title={onClick ? 'Ver unidades' : undefined} className={`bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-3 ${onClick ? 'cursor-pointer hover:border-slate-400 transition-colors' : ''}`}>
+        const StatCard = ({ title, value, suffix = '', icon: Icon, color, onClick, sub, dataKpi }) => (
+            <div data-kpi={dataKpi} onClick={onClick} role={onClick ? 'button' : undefined} title={onClick ? 'Ver unidades' : undefined} className={`bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-3 ${onClick ? 'cursor-pointer hover:border-slate-400 transition-colors' : ''}`}>
                 <div className="p-2.5 rounded-lg shrink-0" style={{ backgroundColor: color + '1a', color }}><Icon /></div>
-                <div className="min-w-0"><p className="text-[11px] text-slate-500 font-medium leading-tight truncate">{title}</p><p className="text-xl font-bold text-slate-800 leading-tight">{value}<span className="text-sm text-slate-400 ml-0.5">{suffix}</span></p></div>
+                <div className="min-w-0"><p className="text-[11px] text-slate-500 font-medium leading-tight">{title}</p><p className="text-xl font-bold text-slate-800 leading-tight">{value}<span className="text-sm text-slate-400 ml-0.5">{suffix}</span></p>{sub && <p className="text-[10px] text-slate-400 leading-tight">{sub}</p>}</div>
             </div>
         );
 
@@ -1333,6 +1334,56 @@
             });
         };
 
+        // --- Reportes de mantenimiento (PDF o foto) ---
+        // Sin Firebase Storage: el archivo se guarda en Firestore partido en pedazos de ~700 KB
+        // (preventive_reports/{id} = datos del archivo; preventive_reports/{id}/chunks/{n} = contenido).
+        const PV_REPORTS = 'preventive_reports';
+        const PV_REPORT_MAX_MB = 8;
+        const PV_CHUNK = 700000;
+        const pvFmtSize = b => b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB';
+        const pvFileB64 = f => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1] || ''); r.onerror = () => rej(new Error('No se pudo leer el archivo')); r.readAsDataURL(f); });
+        const pvCheckReportFile = f => {
+            if (!f) return 'Elige un archivo';
+            const ok = f.type === 'application/pdf' || /\.pdf$/i.test(f.name) || (f.type || '').startsWith('image/');
+            if (!ok) return 'El reporte debe ser PDF o imagen (JPG/PNG)';
+            if (f.type !== 'application/pdf' && !/\.pdf$/i.test(f.name)) return '';
+            return f.size > PV_REPORT_MAX_MB * 1048576 ? `El PDF pesa ${pvFmtSize(f.size)}; el máximo es ${PV_REPORT_MAX_MB} MB` : '';
+        };
+        const pvUploadReport = async (file, meta) => {
+            if (!db) throw new Error('Base de datos no disponible');
+            const bad = pvCheckReportFile(file); if (bad) throw new Error(bad);
+            let mime = file.type || 'application/pdf', b64;
+            if (mime.startsWith('image/')) { const du = await compressImageToDataURL(file); b64 = du.split(',')[1]; mime = 'image/jpeg'; }
+            else { b64 = await pvFileB64(file); mime = 'application/pdf'; }
+            const ref = db.collection(PV_REPORTS).doc();
+            const n = Math.max(1, Math.ceil(b64.length / PV_CHUNK));
+            for (let i = 0; i < n; i++) await ref.collection('chunks').doc(String(i)).set({ i, d: b64.slice(i * PV_CHUNK, (i + 1) * PV_CHUNK) });
+            const info = { rid: ref.id, name: file.name, mime, size: Math.round(b64.length * 3 / 4), chunks: n, uploadedAt: new Date().toISOString() };
+            await ref.set({ ...info, ...meta });
+            return info;
+        };
+        const pvOpenReport = async rep => {
+            // La ventana se abre antes de descargar para que el navegador no la bloquee
+            const w = window.open('', '_blank');
+            if (w) { try { w.document.title = rep.name; w.document.body.innerHTML = '<p style="font-family:sans-serif;color:#64748b;padding:24px">Cargando reporte…</p>'; } catch (e) {} }
+            try {
+                const ref = db.collection(PV_REPORTS).doc(rep.rid);
+                const parts = await Promise.all(Array.from({ length: rep.chunks || 1 }, (_, i) => ref.collection('chunks').doc(String(i)).get()));
+                if (parts.some(s => !s.exists)) throw new Error('El reporte está incompleto');
+                const bin = atob(parts.map(s => s.data().d).join(''));
+                const bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+                const url = URL.createObjectURL(new Blob([bytes], { type: rep.mime || 'application/pdf' }));
+                if (w && !w.closed) w.location.href = url;
+                else { const a = document.createElement('a'); a.href = url; a.download = rep.name; document.body.appendChild(a); a.click(); a.remove(); }
+                setTimeout(() => URL.revokeObjectURL(url), 120000);
+            } catch (e) { if (w && !w.closed) w.close(); throw e; }
+        };
+        const pvDeleteReport = async rep => {
+            const ref = db.collection(PV_REPORTS).doc(rep.rid);
+            await Promise.all(Array.from({ length: rep.chunks || 1 }, (_, i) => ref.collection('chunks').doc(String(i)).delete().catch(() => {})));
+            await ref.delete().catch(() => {});
+        };
+
         // Proyección del siguiente preventivo (misma lógica del tablero de preventivos).
         // Si en el programa ya se marcó una atención más reciente que la del Sheet, esa atención inicia el nuevo ciclo.
         const pvProject = (base, entries) => {
@@ -1417,7 +1468,37 @@
         };
 
         // --- Modal para marcar la atención de una fecha programada ---
-        const PvAttendModal = ({ item, onClose, onAttend, onMiss, onUndo }) => {
+        const PvReportList = ({ e, isAdmin, onAdd, onDel }) => {
+            const [busy, setBusy] = useState(''); const [err, setErr] = useState('');
+            const inputRef = useRef(null);
+            const reps = e.reports || [];
+            const run = async (k, fn) => { setBusy(k); setErr(''); try { await fn(); } catch (x) { setErr(x.message || String(x)); } setBusy(''); };
+            return (
+                <div className="border border-slate-200 rounded-lg p-3 bg-slate-50" data-pv-reports>
+                    <div className="flex items-center justify-between mb-2">
+                        <p className="text-xs font-bold text-slate-600 flex items-center gap-1.5"><Icons.FileText /> Reporte de mantenimiento</p>
+                        {isAdmin && <button data-action="pv-add-report" disabled={!!busy} onClick={() => inputRef.current && inputRef.current.click()} className="text-[11px] font-bold text-rose-600 hover:text-rose-700 flex items-center gap-1 disabled:opacity-50">{busy === 'add' ? <span className="loader-sm"></span> : <Icons.Upload />} Subir PDF</button>}
+                        {isAdmin && <input ref={inputRef} type="file" accept="application/pdf,.pdf,image/*" className="hidden" onChange={ev => { const f = ev.target.files[0]; ev.target.value = ''; if (f) run('add', () => onAdd(f)); }} />}
+                    </div>
+                    {reps.length === 0 && <p className="text-[11px] text-slate-400">{isAdmin ? 'Sin reporte. Sube el PDF de lo que se le realizó a la unidad.' : 'Sin reporte cargado.'}</p>}
+                    <div className="space-y-1.5">
+                        {reps.map(r => (
+                            <div key={r.rid} className="flex items-center gap-2 bg-white border border-slate-200 rounded px-2 py-1.5 text-xs">
+                                <span className="text-rose-500 shrink-0"><Icons.FileText /></span>
+                                <span className="flex-1 min-w-0 truncate text-slate-700" title={r.name}>{r.name}</span>
+                                <span className="text-[10px] text-slate-400 shrink-0">{pvFmtSize(r.size)}</span>
+                                <button data-action="pv-view-report" disabled={!!busy} onClick={() => run('v' + r.rid, () => pvOpenReport(r))} className="text-[11px] font-bold text-slate-600 hover:text-slate-900 shrink-0">{busy === 'v' + r.rid ? <span className="loader-sm"></span> : 'Ver'}</button>
+                                {isAdmin && <button title="Eliminar" disabled={!!busy} onClick={() => { if (confirm(`¿Eliminar el reporte ${r.name}?`)) run('d' + r.rid, () => onDel(r)); }} className="text-slate-400 hover:text-rose-600 shrink-0"><Icons.Trash2 /></button>}
+                            </div>
+                        ))}
+                    </div>
+                    {err && <p className="text-[11px] text-rose-600 mt-1.5">{err}</p>}
+                </div>
+            );
+        };
+
+        const PvAttendModal = ({ item, isAdmin, onClose, onAttend, onMiss, onUndo, onAddReport, onDelReport }) => {
+            const [file, setFile] = useState(null);
             const [mode, setMode] = useState('menu');
             const [fecha, setFecha] = useState(pvIso(pvToday()));
             const [km, setKm] = useState('');
@@ -1439,7 +1520,9 @@
                             <div className="flex items-center gap-2"><span className="text-xs text-slate-500">Estado actual:</span><PvBadge st={item.st} /></div>
                             {item.e.status === 'atendida' && <p className="text-xs text-slate-600">Atendida el <b>{pvF(pvD(item.e.fechaAtencion))}</b>{item.e.obs ? ` · ${item.e.obs}` : ''}.</p>}
                             {item.e.status === 'no_atendida' && <p className="text-xs text-slate-600">Marcada como no atendida{item.e.motivo ? `: ${item.e.motivo}` : ''}.</p>}
-                            {mode === 'menu' && item.e.status !== 'atendida' && (
+                            {mode === 'menu' && item.e.status === 'atendida' && <PvReportList e={item.e} isAdmin={isAdmin} onAdd={f => onAddReport(item, f)} onDel={r => onDelReport(item, r)} />}
+                            {mode === 'menu' && !isAdmin && item.e.status !== 'atendida' && <p className="text-[11px] text-slate-400 flex items-center gap-1.5"><Icons.Info /> Para marcar esta fecha entra como Admin.</p>}
+                            {mode === 'menu' && isAdmin && item.e.status !== 'atendida' && (
                                 <div className={`grid gap-2 ${item.e.status === 'no_atendida' ? 'grid-cols-3' : 'grid-cols-2'}`}>
                                     <button data-action="pv-mark-ok" onClick={() => setMode('ok')} className="rounded-lg border-2 border-emerald-200 bg-emerald-50 hover:bg-emerald-100 p-3 text-left"><p className="font-bold text-emerald-700 flex items-center gap-1.5"><Icons.CheckCircle /> Atendida</p><p className="text-[11px] text-emerald-700/80 mt-1">Se hizo el preventivo</p></button>
                                     {item.e.status !== 'no_atendida'
@@ -1457,6 +1540,12 @@
                                         <div><label className="text-xs font-bold text-slate-500 block">Km del odómetro</label><input type="number" value={km} onChange={e => setKm(e.target.value)} placeholder="Opcional" className="w-full border rounded p-1.5 text-sm" /></div>
                                     </div>
                                     <div><label className="text-xs font-bold text-slate-500 block">Observaciones</label><textarea value={obs} onChange={e => setObs(e.target.value)} rows="2" placeholder="Trabajos realizados, taller…" className="w-full border rounded p-1.5 text-sm"></textarea></div>
+                                    <div><label className="text-xs font-bold text-slate-500 block">Reporte de mantenimiento (PDF, opcional)</label>
+                                        <label className="flex items-center gap-2 border-2 border-dashed border-slate-300 rounded-lg p-2.5 cursor-pointer hover:bg-slate-50 text-slate-600 text-xs">
+                                            <Icons.FileText /> <span className="truncate flex-1">{file ? `${file.name} · ${pvFmtSize(file.size)}` : 'Elegir PDF o foto del reporte'}</span>
+                                            <input type="file" name="pvReporte" accept="application/pdf,.pdf,image/*" className="hidden" onChange={e => { const f = e.target.files[0] || null; const bad = f ? pvCheckReportFile(f) : ''; setErr(bad); setFile(bad ? null : f); }} />
+                                        </label>
+                                        <p className="text-[10px] text-slate-400 mt-1">Máximo {PV_REPORT_MAX_MB} MB. También lo puedes subir después.</p></div>
                                     <p className="text-[11px] text-slate-400">Con esta fecha inicia el siguiente ciclo y se programa su próximo preventivo.</p>
                                 </div>
                             )}
@@ -1471,7 +1560,7 @@
                         </div>
                         <div className="p-4 border-t bg-slate-50 flex justify-end gap-2 rounded-b-2xl">
                             <button onClick={mode === 'menu' ? onClose : () => setMode('menu')} className="px-4 py-2 rounded text-sm hover:bg-slate-200">{mode === 'menu' ? 'Cerrar' : 'Atrás'}</button>
-                            {mode === 'ok' && <button data-action="pv-save-ok" disabled={busy} onClick={() => run(() => { if (!pvD(fecha)) throw new Error('Captura la fecha de atención'); return onAttend(item, { fecha, km: pvNum(km), obs: obs.trim() }); })} className="px-4 py-2 rounded text-sm bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-60 flex items-center gap-2">{busy && <span className="loader-sm"></span>}Registrar atención</button>}
+                            {mode === 'ok' && <button data-action="pv-save-ok" disabled={busy} onClick={() => run(() => { if (!pvD(fecha)) throw new Error('Captura la fecha de atención'); return onAttend(item, { fecha, km: pvNum(km), obs: obs.trim(), file }); })} className="px-4 py-2 rounded text-sm bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-60 flex items-center gap-2">{busy && <span className="loader-sm"></span>}Registrar atención</button>}
                             {mode === 'no' && <button data-action="pv-save-no" disabled={busy} onClick={() => run(() => onMiss(item, { motivo: motivo.trim(), nueva }))} className="px-4 py-2 rounded text-sm bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-60 flex items-center gap-2">{busy && <span className="loader-sm"></span>}Guardar</button>}
                         </div>
                     </div>
@@ -1721,10 +1810,13 @@
                     return true;
                 } catch (e) { console.warn('Google Sheet no actualizado', e); return false; }
             };
-            const onAttend = async (it, { fecha, km, obs }) => {
+            const onAttend = async (it, { fecha, km, obs, file }) => {
                 const fd = pvD(fecha);
-                const entry = { ...it.e, status: 'atendida', fechaAtencion: pvIso(fd), obs: obs || '', km: km ?? null, updatedAt: new Date().toISOString() };
+                let reports = it.e.reports || [], repErr = '';
+                if (file) { try { reports = [...reports, await pvUploadReport(file, { id: it.e.id, planta: it.e.planta, entryKey: it.key, fechaAtencion: pvIso(fd) })]; } catch (e) { console.error(e); repErr = e.message || 'error'; } }
+                const entry = { ...it.e, status: 'atendida', fechaAtencion: pvIso(fd), obs: obs || '', km: km ?? null, reports, updatedAt: new Date().toISOString() };
                 await savePatch(it.key, entry);
+                if (repErr) showNotification('error', `Atención guardada, pero el reporte no se subió: ${repErr}`);
                 const u = unitById[it.e.id];
                 const sheet = u && u.key === it.key ? await syncSheet(u, fd, km, obs, it.e.prog) : null;
                 setAttend(null);
@@ -1739,6 +1831,22 @@
                 await savePatch(it.key, entry);
                 setAttend(null);
                 showNotification('success', nd ? `Unidad ${it.e.id} reprogramada al ${pvF(nd)}` : `Unidad ${it.e.id} marcada como no atendida`);
+            };
+            const onAddReport = async (it, file) => {
+                const info = await pvUploadReport(file, { id: it.e.id, planta: it.e.planta, entryKey: it.key, fechaAtencion: it.e.fechaAtencion || '' });
+                const cur = (plan.entries[it.key] && plan.entries[it.key].reports) || it.e.reports || [];
+                const e2 = { ...(plan.entries[it.key] || it.e), reports: [...cur, info], updatedAt: new Date().toISOString() };
+                await savePatch(it.key, e2);
+                setAttend(a => a && a.key === it.key ? { ...a, e: e2 } : a);
+                showNotification('success', `Reporte de la unidad ${it.e.id} cargado`);
+            };
+            const onDelReport = async (it, r) => {
+                const cur = (plan.entries[it.key] && plan.entries[it.key].reports) || it.e.reports || [];
+                const e2 = { ...(plan.entries[it.key] || it.e), reports: cur.filter(x => x.rid !== r.rid), updatedAt: new Date().toISOString() };
+                await savePatch(it.key, e2);
+                await pvDeleteReport(r);
+                setAttend(a => a && a.key === it.key ? { ...a, e: e2 } : a);
+                showNotification('success', 'Reporte eliminado');
             };
             const onUndo = async it => {
                 const entry = { ...it.e, status: 'pendiente', motivo: '', updatedAt: new Date().toISOString() };
@@ -1757,7 +1865,7 @@
 
             if (!base || !plan) return <div className="bg-white border border-slate-200 rounded-xl p-10 text-center text-slate-400 text-sm"><span className="loader mr-2"></span> Cargando programa de preventivos…</div>;
 
-            const openItem = it => { if (isAdmin) setAttend(it); };
+            const openItem = it => setAttend(it);
             return (
                 <div className="space-y-5" data-view="preventivo">
                     <div className="flex items-center justify-between flex-wrap gap-3">
@@ -1768,18 +1876,18 @@
                         </div>
                         <div className="flex items-center gap-2 flex-wrap text-xs">
                             <span className="text-slate-400" data-pv-source>{units.length} unidades · fuente: {source}{corte ? ` · corte ${pvF(pvD(corte))}` : ''}{plan.startedAt ? ` · programa desde ${pvF(pvD(plan.startedAt))}` : ''}</span>
-                            {isAdmin && <button data-action="pv-import" onClick={() => setShowImport(true)} className="bg-white border border-slate-300 hover:bg-slate-100 px-2.5 py-1 rounded flex items-center gap-1.5 text-slate-600"><Icons.FileSheet /> Actualizar con Excel</button>}
+                            {<button data-action="pv-import" onClick={() => isAdmin ? setShowImport(true) : showNotification('error', 'Entra como Admin para actualizar con Excel')} className="bg-white border border-slate-300 hover:bg-slate-100 px-2.5 py-1 rounded flex items-center gap-1.5 text-slate-600"><Icons.FileSheet /> Actualizar con Excel</button>}
                             {isAdmin && <button onClick={() => setShowCfg(true)} className="bg-white border border-slate-300 hover:bg-slate-100 px-2.5 py-1 rounded flex items-center gap-1.5 text-slate-600"><Icons.Wrench /> Parámetros</button>}
                         </div>
                     </div>
                     {planErr && <div className="text-xs bg-amber-50 text-amber-700 border border-amber-200 px-3 py-2 rounded-lg">No se pudo leer el programa guardado. Las fechas mostradas son provisionales y no se guardan hasta que se recupere la conexión.</div>}
-                    {!isAdmin && <p className="text-[11px] text-slate-400 -mt-2 flex items-center gap-1.5"><Icons.Info /> Para marcar una fecha como atendida o no atendida entra como Admin.</p>}
+                    {!isAdmin && <p className="text-[11px] text-slate-400 -mt-2 flex items-center gap-1.5"><Icons.Info /> Para marcar fechas o subir reportes entra como Admin. Clic en una unidad atendida para ver su reporte.</p>}
 
                     {tab === 'resumen'
                         ? <PvResumen FI={FI} cur={curItems} entries={entries} cfg={plan.config} hoy={hoy} stFilter={stFilter} setStFilter={setStFilter} isAdmin={isAdmin} onOpen={openItem} />
                         : <PvGantt FI={FI} unitById={unitById} cfg={plan.config} hoy={hoy} hor={hor} setHor={setHor} grp={grp} setGrp={setGrp} isAdmin={isAdmin} onOpen={openItem} />}
 
-                    {attend && <PvAttendModal item={attend} onClose={() => setAttend(null)} onAttend={onAttend} onMiss={onMiss} onUndo={onUndo} />}
+                    {attend && <PvAttendModal key={attend.key} item={attend} isAdmin={isAdmin} onClose={() => setAttend(null)} onAttend={onAttend} onMiss={onMiss} onUndo={onUndo} onAddReport={onAddReport} onDelReport={onDelReport} />}
                     {showCfg && <PvConfigModal cfg={plan.config} pendingFuture={pendingFuture} onClose={() => setShowCfg(false)} onSave={saveCfg} onReplan={replan} />}
                     {showImport && <PvImportModal base={base} corte={corte} source={source} baseRef={baseRef} onClose={() => setShowImport(false)} showNotification={showNotification} />}
                 </div>
@@ -1835,6 +1943,10 @@
                 const at = a.filter(it => it.st === 'atendida').length, du = a.filter(it => it.prog && it.prog < hoy && it.st !== 'atendida').length + at;
                 return { p, n: c.length, v: c.filter(it => it.st === 'vencida').length, no: c.filter(it => it.st === 'no').length, s: c.filter(it => it.st === 'semana').length, at, pct: du ? at / du * 100 : null };
             });
+            const atList = atendidas.filter(it => it.hist === undefined).sort((a, b) => String(b.e.fechaAtencion || '').localeCompare(String(a.e.fechaAtencion || '')) || String(a.e.id).localeCompare(String(b.e.id), 'es', { numeric: true }));
+            const conRep = atList.filter(it => (it.e.reports || []).length).length;
+            const [atOnlySin, setAtOnlySin] = useState(false);
+            const atShow = atOnlySin ? atList.filter(it => !(it.e.reports || []).length) : atList;
             const rank = { vencida: 0, no: 1, semana: 2, programada: 3 };
             const list = cur.filter(it => it.st !== 'atendida' && (!stFilter || it.st === stFilter))
                 .sort((a, b) => rank[a.st] - rank[b.st] || (a.prog - b.prog)).slice(0, stFilter ? 200 : 15);
@@ -1906,6 +2018,32 @@
                                             {isAdmin && <td className="p-3 text-right"><button data-mark={it.e.id} onClick={() => onOpen(it)} className="text-xs border border-slate-300 hover:bg-slate-100 px-2 py-1 rounded whitespace-nowrap">Marcar</button></td>}
                                         </tr>
                                     ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                        <div className="p-4 bg-slate-50 font-bold border-b flex justify-between items-center text-sm flex-wrap gap-2">
+                            <span className="flex gap-2 items-center"><span className="text-emerald-600"><Icons.FileText /></span> Atendidas y reportes de mantenimiento</span>
+                            <span className="flex items-center gap-2">
+                                <button onClick={() => setAtOnlySin(x => !x)} className={`text-xs font-normal px-2 py-1 rounded border ${atOnlySin ? 'bg-slate-800 text-white border-slate-800' : 'border-slate-300 text-slate-500 hover:bg-slate-100'}`}>Solo sin reporte</button>
+                                <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-1 rounded-full" data-rep-count>{conRep} de {atList.length} con reporte</span>
+                            </span>
+                        </div>
+                        <div className="max-h-96 overflow-y-auto">
+                            <table className="w-full text-sm text-left" data-table="pv-atendidas">
+                                <thead className="bg-slate-50 text-slate-500 text-xs sticky top-0"><tr><th className="p-3">Unidad</th><th className="p-3">Planta</th><th className="p-3">Atendida</th><th className="p-3 hidden md:table-cell">Programada</th><th className="p-3">Reporte</th><th className="p-3"></th></tr></thead>
+                                <tbody className="divide-y">
+                                    {atShow.length === 0 && <tr><td colSpan="6" className="p-6 text-center text-slate-400">{atList.length ? 'Todas las atendidas tienen reporte.' : 'Aún no hay preventivos atendidos.'}</td></tr>}
+                                    {atShow.map(it => { const n = (it.e.reports || []).length; return (
+                                        <tr key={it.key} className="hover:bg-slate-50">
+                                            <td className="p-3 font-bold text-slate-700">{it.e.id}</td>
+                                            <td className="p-3 text-slate-500 text-xs">{AREA_META[it.e.planta] ? AREA_META[it.e.planta].code : it.e.planta}</td>
+                                            <td className="p-3 text-slate-700 text-xs font-bold whitespace-nowrap">{pvF(pvD(it.e.fechaAtencion))}</td>
+                                            <td className="p-3 text-slate-500 text-xs whitespace-nowrap hidden md:table-cell">{pvF(it.prog)}</td>
+                                            <td className="p-3">{n ? <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">PDF{n > 1 ? ` ×${n}` : ''}</span> : <span className="text-[11px] text-slate-400">Sin reporte</span>}</td>
+                                            <td className="p-3 text-right"><button data-rep={it.e.id} onClick={() => onOpen(it)} className="text-xs border border-slate-300 hover:bg-slate-100 px-2 py-1 rounded whitespace-nowrap">{n ? 'Ver' : (isAdmin ? 'Subir' : 'Ver')}</button></td>
+                                        </tr>); })}
                                 </tbody>
                             </table>
                         </div>
@@ -2016,7 +2154,7 @@
                             {tip.it.hist !== undefined && <><br />Falta reprogramada{tip.it.motivo ? `: ${tip.it.motivo}` : ''}</>}
                             {tip.it.st === 'no' && tip.it.hist === undefined && tip.it.e.motivo && <><br />Motivo: {tip.it.e.motivo}</>}
                             {tip.it.current && tip.u && <><br />Último prev.: {pvF(tip.u.ult)} · Proyectado: {pvF(tip.u.proy)}</>}
-                            {isAdmin && tip.it.hist === undefined && <><br /><i className="text-slate-400">Clic para marcar</i></>}
+                            {tip.it.hist === undefined && <><br /><i className="text-slate-400">{isAdmin ? 'Clic para marcar o subir reporte' : 'Clic para ver detalle'}</i></>}
                         </div>
                     )}
                 </div>
@@ -2217,8 +2355,16 @@
                 const topAttention = [...list].filter(v => tireCrit(v) || (v.requiereReparacion || 0) > 0 || (v.mecanix !== null && v.mecanix < 0.9))
                     .sort((a, b) => (tireCrit(b) ? 1 : 0) - (tireCrit(a) ? 1 : 0) || (b.requiereReparacion || 0) - (a.requiereReparacion || 0) || (a.mecanix ?? 1) - (b.mecanix ?? 1)).slice(0, 5);
 
-                return { total, sinEval, avgScore, requierenRep, avgAge, yearData, noCumpleYearData, noCumpleTotal, bucketData, typeData, plantScoreData, topAttention, tireByVid, tireCounts };
-            }, [filteredVehicles, fcInfoByVehicle]);
+                // Avance de llenado de FleetCheck: unidad completa = todos los puntos del checklist con Cumple / No cumple
+                const fcProgOf = vs => {
+                    const r = { n: vs.length, comp: 0, proc: 0, sin: 0, rev: 0, tot: 0 };
+                    vs.forEach(v => { const i = fcInfoByVehicle[v.vehicleId]; r.tot += fcApartados.length; if (!i) { r.sin++; return; } r.rev += i.revisado; if (i.revisado >= i.total) r.comp++; else if (i.revisado > 0) r.proc++; else r.sin++; });
+                    r.pct = r.n ? r.comp / r.n * 100 : null; r.pctPts = r.tot ? r.rev / r.tot * 100 : null; return r;
+                };
+                const fcProg = fcApartados.length ? { ...fcProgOf(list), byPlant: PLANT_ORDER.map(p => ({ p, ...fcProgOf(list.filter(v => v.plant === p)) })).filter(x => x.n) } : null;
+
+                return { total, sinEval, avgScore, requierenRep, avgAge, yearData, noCumpleYearData, noCumpleTotal, bucketData, typeData, plantScoreData, topAttention, tireByVid, tireCounts, fcProg };
+            }, [filteredVehicles, fcInfoByVehicle, fcApartados]);
 
             // --- Detalle al picarle a una barra de los gráficos ---
             const openYearBarDetail = (bar, onlyLabel) => {
@@ -2249,6 +2395,34 @@
                     vehicles: vs,
                     metricLabel: 'Peor llanta',
                     metricGet: v => { const t = stats.tireByVid[v.vehicleId]; return t && t.hasData ? <span className="text-xs font-bold" style={{ color: t.status.text }}>#{t.worstPos} · {fmtMm(t.worst)} mm</span> : <span className="text-xs text-slate-400">Sin dato</span>; }
+                });
+            };
+
+            const openFcProgress = () => {
+                const fp = stats.fcProg; if (!fp) return;
+                const st = v => { const i = fcInfoByVehicle[v.vehicleId]; return !i ? -1 : i.revisado >= i.total ? 2 : i.revisado > 0 ? 1 : 0; };
+                const vs = filteredVehicles.filter(v => st(v) < 2).sort((a, b) => st(b) - st(a) || ((fcInfoByVehicle[b.vehicleId] || {}).revisado || 0) - ((fcInfoByVehicle[a.vehicleId] || {}).revisado || 0) || a.vehicleId - b.vehicleId);
+                setChartDetail({
+                    title: 'Avance de evaluación FleetCheck — unidades pendientes',
+                    vehicles: vs,
+                    metricLabel: 'Puntos revisados',
+                    header: (
+                        <div className="p-4 border-b space-y-2" data-fc-plantas>
+                            <p className="text-[11px] text-slate-500">Unidad completa = todos los puntos del checklist con Cumple / No cumple. {fp.comp} de {fp.n} completas · {fp.proc} en proceso · {fp.sin} sin iniciar · {Math.round(fp.pctPts)}% de los puntos revisados.</p>
+                            {fp.byPlant.map(r => (
+                                <div key={r.p} className="flex items-center gap-2 text-xs">
+                                    <span className="w-20 shrink-0 font-bold text-slate-600">{AREA_META[r.p].label}</span>
+                                    <div className="flex-1 h-2.5 bg-slate-100 rounded-full overflow-hidden flex">
+                                        <div style={{ width: (r.comp / r.n * 100) + '%', backgroundColor: '#10b981' }}></div>
+                                        <div style={{ width: (r.proc / r.n * 100) + '%', backgroundColor: '#fbbf24' }}></div>
+                                    </div>
+                                    <span className="w-24 shrink-0 text-right text-slate-500"><b className="text-slate-700">{Math.round(r.pct)}%</b> · {r.comp}/{r.n}</span>
+                                </div>
+                            ))}
+                            <p className="text-[10px] text-slate-400 flex gap-3"><span><span className="inline-block w-2 h-2 rounded-full mr-1" style={{ backgroundColor: '#10b981' }}></span>Completas</span><span><span className="inline-block w-2 h-2 rounded-full mr-1" style={{ backgroundColor: '#fbbf24' }}></span>En proceso</span></p>
+                        </div>
+                    ),
+                    metricGet: v => { const i = fcInfoByVehicle[v.vehicleId]; return !i ? <span className="text-xs text-slate-400">Sin FleetCheck</span> : <span className={`text-xs font-bold ${i.revisado ? 'text-amber-600' : 'text-slate-400'}`}>{i.revisado}/{i.total}</span>; }
                 });
             };
 
@@ -2331,9 +2505,10 @@
                         )}
 
                         {/* KPIs */}
-                        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
+                        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-4">
                             <StatCard title="Total de unidades" value={stats.total} icon={Icons.Truck} color="#1e293b" />
                             <StatCard title="Sin evaluación" value={stats.sinEval} icon={Icons.AlertTriangle} color="#94a3b8" />
+                            <StatCard dataKpi="fleetcheck" title="Avance FleetCheck" value={stats.fcProg && stats.fcProg.pct !== null ? Math.round(stats.fcProg.pct) : '—'} suffix={stats.fcProg && stats.fcProg.pct !== null ? '%' : ''} sub={stats.fcProg ? `${stats.fcProg.comp} de ${stats.fcProg.n} evaluadas` : 'Cargando…'} icon={Icons.CheckCircle} color="#6366f1" onClick={stats.fcProg ? openFcProgress : undefined} />
                             <StatCard title="Score Mecanix promedio" value={stats.avgScore !== null ? (stats.avgScore * 100).toFixed(1) : '—'} suffix={stats.avgScore !== null ? '%' : ''} icon={Icons.Wrench} color="#10b981" />
                             <StatCard title="Requieren reparación" value={stats.requierenRep} icon={Icons.AlertTriangle} color="#e11d48" />
                             <StatCard title="Antigüedad promedio" value={stats.avgAge.toFixed(1)} suffix=" años" icon={Icons.Calendar} color="#0ea5e9" />
