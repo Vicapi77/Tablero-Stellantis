@@ -425,9 +425,8 @@
             }
             const zero = value === 0;
             const cls = zero ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-100 text-rose-700';
-            // El color va también en la celda para que se pinte completa aunque la fila crezca de alto
             return (
-                <td className={`p-0 text-center align-middle ${zero ? 'bg-emerald-50' : 'bg-rose-100'}`}>
+                <td className="p-0 text-center align-middle">
                     <button onClick={onClick} className={`cell-btn w-full h-full py-1 font-bold text-xs ${cls}`} title="Ver detalle">
                         {value}
                     </button>
@@ -480,29 +479,6 @@
             'Norte': { T1: 37, T2: 37, T3: 37 },
         };
         const unitNum = v => (v === null || v === undefined || v === '') ? null : (isFinite(+v) ? +v : null);
-        // Helpers de unidades para usarlos dentro de la matriz de incidencias (subcolumna "Unidades" por turno fijo)
-        const unitHelpers = (counts, base) => {
-            const B = (p, k) => unitNum(base && base[p] && base[p][k]) ?? unitNum(UNIT_BASE_DEFAULT[p] && UNIT_BASE_DEFAULT[p][k]) ?? 0;
-            const V = (p, k) => unitNum(counts && counts[p] && counts[p][k]);
-            // Totales: solo cuentan los turnos ya capturados (lo no capturado no es faltante)
-            const tot = cells => { const cap = cells.filter(c => c.v !== null); return cap.length ? { v: cap.reduce((a, c) => a + c.v, 0), b: cap.reduce((a, c) => a + c.b, 0) } : { v: null, b: cells.reduce((a, c) => a + c.b, 0) }; };
-            return { B, V, tot };
-        };
-        const unitPct = t => (t.v === null || !t.b) ? null : Math.round(t.v / t.b * 100);
-        const UnitMatrixCell = ({ v, b }) => {
-            if (v === null) return <td className="p-1 text-center text-xs text-slate-400 bg-slate-50 tabular-nums border-l-2 border-slate-200"><span className="text-slate-300">—</span>/{b}</td>;
-            const ok = v >= b;
-            return <td className={`p-1 text-center text-xs font-bold tabular-nums border-l-2 border-slate-200 ${ok ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-100 text-rose-700'}`} title={ok ? 'Unidades completas' : `Faltan ${b - v} unidades`}>{v}/{b}</td>;
-        };
-        const UnitTotalCell = ({ t, strong = false }) => {
-            const p = unitPct(t);
-            const tone = p === null ? '' : p >= 100 ? 'text-emerald-700' : p >= 90 ? 'text-amber-700' : 'text-rose-700';
-            return (
-                <td className={`p-1 text-center text-xs tabular-nums ${strong ? 'bg-slate-200 text-slate-900' : 'bg-slate-100 text-slate-800'} font-bold`}>
-                    {t.v === null ? <span className="text-slate-400 font-normal">—/{t.b}</span> : <><div className="whitespace-nowrap leading-tight">{t.v}/{t.b}</div><div className={`text-[10px] leading-tight ${tone}`}>{p}%</div></>}
-                </td>
-            );
-        };
         const UnitsMatrix = ({ counts, base }) => {
             const shifts = SHIFTS.filter(s => UNIT_SHIFTS.includes(s.key));
             const B = (p, k) => unitNum(base && base[p] && base[p][k]) ?? unitNum(UNIT_BASE_DEFAULT[p] && UNIT_BASE_DEFAULT[p][k]) ?? 0;
@@ -586,17 +562,14 @@
             const resetMonthRange = () => { const r = currentMonthRange(); setMonthRangeStart(r.start); setMonthRangeEnd(r.end); };
 
             const visibleShifts = useMemo(() => SHIFTS.filter(sh => shiftTypeFilter === 'Todos' ? true : shiftTypeFilter === 'Fijos' ? sh.type === 'fijo' : sh.type === 'mixto'), [shiftTypeFilter]);
-            // Las columnas de unidades solo se pintan mientras se genera la imagen (en el tablero la matriz se ve normal)
-            const [unitsInCapture, setUnitsInCapture] = useState(false);
-            // En la imagen solo van los turnos fijos (sin Mixto de Mañana / Mixto de Tarde)
-            const tableShifts = useMemo(() => unitsInCapture ? visibleShifts.filter(sh => sh.type !== 'mixto') : visibleShifts, [visibleShifts, unitsInCapture]);
-            const unitShiftKeys = useMemo(() => unitsInCapture ? visibleShifts.filter(sh => UNIT_SHIFTS.includes(sh.key)).map(sh => sh.key) : [], [visibleShifts, unitsInCapture]);
-            const U = useMemo(() => unitHelpers(unitCounts, unitBase), [unitCounts, unitBase]);
-            const unitRowTot = plant => U.tot(unitShiftKeys.map(k => ({ v: U.V(plant, k), b: U.B(plant, k) })));
-            const unitColTot = k => U.tot(AREA_ROWS.map(a => ({ v: U.V(a.plant, k), b: U.B(a.plant, k) })));
-            const unitGrand = U.tot(AREA_ROWS.flatMap(a => unitShiftKeys.map(k => ({ v: U.V(a.plant, k), b: U.B(a.plant, k) }))));
-            const unitGrandPct = unitPct(unitGrand);
             const plantsToShow = useMemo(() => selectedPlant === 'Todas' ? AREA_ROWS : AREA_ROWS.filter(a => a.plant === selectedPlant), [selectedPlant]);
+            // Reportes de turno según el filtro Todos / Fijos / Mixtos: aplica a la matriz, al resumen y a las tendencias
+            const shiftIncidents = useMemo(() => {
+                if (shiftTypeFilter === 'Todos') return incidents;
+                const keys = new Set(visibleShifts.map(s => s.key));
+                return incidents.filter(i => keys.has(i.shift));
+            }, [incidents, shiftTypeFilter, visibleShifts]);
+            const shiftFilterTxt = shiftTypeFilter === 'Todos' ? '' : shiftTypeFilter === 'Fijos' ? 'Solo turnos fijos (1er, 2do y 3er)' : 'Solo turnos mixtos (mañana y tarde)';
 
             // Descarga solo el bloque de la matriz (tabla + leyenda) como imagen PNG, sin el resto del dashboard.
             // Importante: la tabla vive dentro de un contenedor con scroll horizontal (overflow-x-auto), así que
@@ -608,9 +581,6 @@
                 const scrollBox = matrixScrollRef.current;
                 if (!el || typeof html2canvas === 'undefined') { setDownloadImgError(true); setTimeout(() => setDownloadImgError(false), 3000); return; }
                 setDownloadingImg(true); setDownloadImgError(false);
-                // Muestra las columnas de unidades solo para la foto y espera a que React las pinte antes de medir
-                const withUnits = matrixView === 'inc' && shiftTypeFilter !== 'Mixtos';
-                if (withUnits) { setUnitsInCapture(true); await new Promise(r => setTimeout(() => requestAnimationFrame(() => requestAnimationFrame(r)), 30)); }
                 try {
                     const tableEl = scrollBox ? scrollBox.querySelector('table') : null;
                     const fullWidth = Math.max(el.scrollWidth, scrollBox ? scrollBox.scrollWidth : 0, tableEl ? tableEl.scrollWidth : 0);
@@ -641,7 +611,6 @@
                     console.error('Error al generar la imagen de la matriz:', e);
                     setDownloadImgError(true); setTimeout(() => setDownloadImgError(false), 3000);
                 }
-                if (withUnits) setUnitsInCapture(false);
                 setDownloadingImg(false);
             };
 
@@ -681,7 +650,7 @@
             // ---- MATRIZ DEL DÍA SELECCIONADO (siempre todas las áreas) ----
             const matrix = useMemo(() => {
                 const dmy = isoToDMY(selectedDate);
-                const dayIncidents = incidents.filter(i => i.date === dmy);
+                const dayIncidents = shiftIncidents.filter(i => i.date === dmy);
                 const rows = AREA_ROWS.map(area => {
                     const areaIncidents = dayIncidents.filter(i => i.plant === area.plant);
                     const shiftsData = SHIFTS.map(sh => {
@@ -719,12 +688,12 @@
                     }
                 };
                 return { dmy, rows, totals, dayIncidents };
-            }, [incidents, selectedDate]);
+            }, [shiftIncidents, selectedDate]);
 
             // ---- Agrega arranques/llegadas/percances/fallas mecánicas por planta para UN día (todos los turnos) ----
             const dayBucket = (iso) => {
                 const dmy = isoToDMY(iso);
-                const dayIncidents = incidents.filter(i => i.date === dmy);
+                const dayIncidents = shiftIncidents.filter(i => i.date === dmy);
                 const perPlant = {};
                 AREA_ROWS.forEach(a => {
                     const list = dayIncidents.filter(i => i.plant === a.plant);
@@ -752,7 +721,7 @@
                     guard++;
                 }
                 return { days, label: `${isoShortDayMonth(start)} – ${isoShortDayMonth(end)} ${isoToParts(end).y}` };
-            }, [incidents, weekRangeStart, weekRangeEnd]);
+            }, [shiftIncidents, weekRangeStart, weekRangeEnd]);
 
             // ---- RESUMEN SEMANAL (mismo rango que "Tendencias semanales"; totales y desglose por planta) ----
             const weekSummary = useMemo(() => {
@@ -777,7 +746,7 @@
                 if (!start || !end) return { pieData: [], byPlant: [], legend: [] };
                 if (end < start) { const t = start; start = end; end = t; }
                 const plantSet = new Set(plantsToShow.map(p => p.plant));
-                const relevant = incidents.filter(i => {
+                const relevant = shiftIncidents.filter(i => {
                     if (!i.date || !plantSet.has(i.plant)) return false;
                     const iso = dmyToIso(i.date);
                     return iso >= start && iso <= end;
@@ -807,7 +776,7 @@
                 });
 
                 return { pieData: legend, byPlant, legend };
-            }, [incidents, weekRangeStart, weekRangeEnd, plantsToShow]);
+            }, [shiftIncidents, weekRangeStart, weekRangeEnd, plantsToShow]);
 
             // ---- TENDENCIA MENSUAL (un punto por semana lunes-domingo entre la fecha de inicio y fin elegidas; rango independiente del de la matriz) ----
             const trendMonth = useMemo(() => {
@@ -841,18 +810,19 @@
                     guard++;
                 }
                 return { days, label: `${isoShortDayMonth(start)} – ${isoShortDayMonth(end)} ${isoToParts(end).y}` };
-            }, [incidents, monthRangeStart, monthRangeEnd]);
+            }, [shiftIncidents, monthRangeStart, monthRangeEnd]);
 
             const dayStats = useMemo(() => {
                 const list = matrix.dayIncidents;
                 const arranques = list.reduce((s, i) => s + (i.lateStarts || 0) + (i.lateStartsNoAff || 0), 0);
                 const llegadas = list.reduce((s, i) => s + (i.imp || 0) + (i.noImp || 0), 0);
                 const accidents = list.reduce((s, i) => s + (i.accidents || 0), 0);
-                const cruces = AREA_ROWS.length * SHIFTS.length;
-                const crucesLimpios = matrix.rows.reduce((s, r) => s + r.shiftsData.filter(sd => sd.arranques === 0 && sd.llegadas === 0).length, 0);
+                const vis = new Set(visibleShifts.map(s => s.key));
+                const cruces = AREA_ROWS.length * visibleShifts.length;
+                const crucesLimpios = matrix.rows.reduce((s, r) => s + r.shiftsData.filter(sd => vis.has(sd.key) && sd.arranques === 0 && sd.llegadas === 0).length, 0);
                 const cumplimiento = cruces > 0 ? ((crucesLimpios / cruces) * 100).toFixed(0) : 100;
                 return { arranques, llegadas, accidents, cumplimiento };
-            }, [matrix]);
+            }, [matrix, visibleShifts]);
 
             const causeSummary = (list, causeDefs) => {
                 const sums = causeDefs.map(([key, label]) => ({ label, val: list.reduce((s, i) => s + (i[key] || 0), 0) }));
@@ -1053,7 +1023,7 @@
 
                     <main className="max-w-7xl mx-auto px-4 py-8 space-y-8">
                         <div className="flex items-center justify-between flex-wrap gap-2">
-                            <h2 className="text-lg font-bold text-slate-700">{isoLongLabel(selectedDate)}</h2>
+                            <h2 className="text-lg font-bold text-slate-700">{isoLongLabel(selectedDate)}{shiftFilterTxt && <span data-shift-badge className="ml-2 align-middle inline-flex items-center gap-1 bg-slate-800 text-white rounded-full px-2 py-0.5 text-[10px] font-bold">{shiftFilterTxt}<button onClick={() => setShiftTypeFilter('Todos')} className="text-slate-300 hover:text-white" title="Ver todos los turnos">×</button></span>}</h2>
                             {loadError && <span className="text-xs bg-amber-50 text-amber-700 border border-amber-200 px-3 py-1.5 rounded-full">No fue posible conectar con la base de datos en vivo — verifica tu conexión.</span>}
                         </div>
 
@@ -1097,32 +1067,25 @@
                             <div className="flex items-center gap-2 mb-2">
                                 <span className="text-slate-500"><Icons.Table /></span>
                                 <h4 className="font-bold text-slate-800 text-sm">{matrixView === 'units' ? 'Unidades por turno' : 'Matriz diaria por área y turno'}</h4>
-                                <span className="text-xs text-slate-400">— {isoLongLabel(selectedDate)} · {matrixView === 'units' ? 'unidades en servicio / unidades base' : `${selectedPlant === 'Todas' ? 'Todas las áreas' : selectedPlant} · ${unitsInCapture ? 'Turnos fijos' : shiftTypeFilter}`}</span>
-                                {matrixView === 'inc' && unitShiftKeys.length > 0 && (
-                                    <span className={`ml-auto text-xs font-bold px-2.5 py-1 rounded border tabular-nums ${unitGrandPct === null ? 'bg-slate-100 text-slate-500 border-slate-200' : unitGrandPct >= 100 ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : unitGrandPct >= 90 ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-rose-50 text-rose-700 border-rose-200'}`}>
-                                        Cumplimiento de unidades: {unitGrandPct === null ? 'sin captura' : `${unitGrandPct}% · ${unitGrand.v}/${unitGrand.b}`}
-                                    </span>
-                                )}
+                                <span className="text-xs text-slate-400">— {isoLongLabel(selectedDate)} · {matrixView === 'units' ? 'unidades en servicio / unidades base' : `${selectedPlant === 'Todas' ? 'Todas las áreas' : selectedPlant} · ${shiftTypeFilter}`}</span>
                             </div>
                             {matrixView === 'units' ? (<>
                                 <UnitsMatrix counts={unitCounts} base={unitBase} />
                                 <p className="text-[11px] text-slate-400 mt-3 flex items-center gap-1.5"><Icons.Info /> Unidades en servicio / unidades base por turno. Verde = completo, rosa = faltan unidades, "—" = sin captura del día. Los totales comparan solo los turnos capturados. Se capturan en el Dashboard de Transporte (Gestionar ▸ Unidades).</p>
                             </>) : (<>
                             <div ref={matrixScrollRef} data-matrix-scroll="true" className="overflow-x-auto">
-                                <table className={`matrix-tbl w-full text-[11px] border-collapse ${unitShiftKeys.length > 0 ? (tableShifts.length > 3 ? 'min-w-[1100px]' : 'min-w-[680px]') : (tableShifts.length > 3 ? 'min-w-[920px]' : 'min-w-[600px]')}`}>
+                                <table className={`matrix-tbl w-full text-[11px] border-collapse ${visibleShifts.length > 3 ? 'min-w-[920px]' : 'min-w-[600px]'}`}>
                                     <thead>
                                         <tr>
                                             <th rowSpan="2" className="bg-slate-800 text-white p-1 sticky left-0 z-10">Área</th>
-                                            {tableShifts.map(sh => <th key={sh.key} colSpan={unitShiftKeys.includes(sh.key) ? 3 : 2} className={`p-1 font-bold text-[10px] leading-tight ${sh.head}`}>{sh.label}</th>)}
+                                            {visibleShifts.map(sh => <th key={sh.key} colSpan="2" className={`p-1 font-bold text-[10px] leading-tight ${sh.head}`}>{sh.label}</th>)}
                                             <th colSpan="3" className="bg-slate-900 text-white p-1 font-bold text-[10px]">ACC. Y FALLAS MEC.</th>
-                                            {unitShiftKeys.length > 0 && <th rowSpan="2" className="bg-emerald-800 text-white p-1 font-bold text-[10px] leading-tight">UNIDADES<br />DEL DÍA</th>}
                                         </tr>
                                         <tr>
-                                            {tableShifts.map(sh => (
+                                            {visibleShifts.map(sh => (
                                                 <React.Fragment key={sh.key}>
                                                     <th className="bg-white p-0.5 font-semibold text-slate-500 text-[10px]" title="Arranques fuera de tiempo"><span className="flex items-center justify-center gap-0.5 text-sky-600"><Icons.ArrowUpRight />Arranques</span></th>
                                                     <th className="bg-white p-0.5 font-semibold text-slate-500 text-[10px]" title="Llegadas fuera de tiempo"><span className="flex items-center justify-center gap-0.5 text-rose-500"><Icons.ArrowDownRight />Llegadas</span></th>
-                                                    {unitShiftKeys.includes(sh.key) && <th className="bg-white p-0.5 font-semibold text-emerald-700 text-[10px] border-l-2 border-slate-200" title="Unidades en servicio / unidades base">Unidades</th>}
                                                 </React.Fragment>
                                             ))}
                                             {ACC_COLS.map(c => <th key={c.key} className={`${c.head} text-white p-1 font-bold text-[10px]`}>{c.key}</th>)}
@@ -1139,24 +1102,22 @@
                                                 <td className="p-1 font-bold text-slate-700 bg-slate-50 sticky left-0 z-10">
                                                     <div className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full inline-block" style={{ backgroundColor: r.area.color }}></span>{r.area.code}</div>
                                                 </td>
-                                                {tableShifts.map(shDef => {
+                                                {visibleShifts.map(shDef => {
                                                     const sd = r.shiftsData.find(x => x.key === shDef.key);
                                                     return (
                                                         <React.Fragment key={shDef.key}>
                                                             <MatrixCell value={sd.arranques} hasData={sd.list.length > 0} onClick={() => openArranquesDetail(r.area, shDef)} />
                                                             <MatrixCell value={sd.llegadas} hasData={sd.list.length > 0} onClick={() => openLlegadasDetail(r.area, shDef)} />
-                                                            {unitShiftKeys.includes(shDef.key) && <UnitMatrixCell v={U.V(r.area.plant, shDef.key)} b={U.B(r.area.plant, shDef.key)} />}
                                                         </React.Fragment>
                                                     );
                                                 })}
                                                 {ACC_COLS.map(c => <MatrixCell key={c.key} value={r.acc[c.key]} hasData={areaHasData} onClick={() => openAccDetail(r.area, c)} />)}
-                                                {unitShiftKeys.length > 0 && <UnitTotalCell t={unitRowTot(r.area.plant)} />}
                                             </tr>
                                             );
                                         })}
                                         <tr className="font-bold">
                                             <td className="p-1 bg-slate-800 text-white sticky left-0 z-10 text-xs">Total</td>
-                                            {tableShifts.map(shDef => {
+                                            {visibleShifts.map(shDef => {
                                                 const t = matrix.totals.shifts.find(x => x.key === shDef.key);
                                                 const shiftHasData = matrix.rows.some(r => r.shiftsData.find(x => x.key === shDef.key).list.length > 0);
                                                 return (
@@ -1172,7 +1133,6 @@
                                                                 <td className="p-0 text-center bg-slate-100"><span className="block w-full h-full py-1 text-xs text-slate-300 select-none" title="Sin datos capturados aún">—</span></td>
                                                             </>
                                                         )}
-                                                        {unitShiftKeys.includes(shDef.key) && <UnitTotalCell t={unitColTot(shDef.key)} />}
                                                     </React.Fragment>
                                                 );
                                             })}
@@ -1186,14 +1146,12 @@
                                                     </td>
                                                 ));
                                             })()}
-                                            {unitShiftKeys.length > 0 && <UnitTotalCell t={unitGrand} strong />}
                                         </tr>
                                     </tbody>
                                 </table>
                             </div>
                             <p className="text-[11px] text-slate-400 mt-3 flex items-center gap-1.5"><Icons.Info /> Haz clic en cualquier celda para ver el detalle de las incidencias que la componen. Celdas en verde = sin novedad, en rosa = con incidencias, "—" = sin reporte capturado aún.</p>
                             <p className="text-[11px] text-slate-400 mt-1 flex items-center gap-1.5"><Icons.AlertOctagon /> A = Accidente grave · B = Accidente moderado · C = Falla mecánica. Arranques = todos los inicios tarde (con y sin afectación).</p>
-                            {unitShiftKeys.length > 0 && <p className="text-[11px] text-slate-400 mt-1 flex items-center gap-1.5"><Icons.Truck /> Unidades = en servicio / base por turno (verde = completo, rosa = faltan). Los totales comparan solo los turnos capturados.</p>}
                             </>)}
                             </div>
                         </div>
@@ -1202,7 +1160,7 @@
                         <div>
                             <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
                                 <h3 className="text-lg font-bold text-slate-700 flex items-center gap-2"><span className="bg-slate-200 p-1 rounded"><Icons.Layers /></span> Resumen semanal</h3>
-                                <p className="text-[11px] text-slate-400">{trendWeek.label} · {selectedPlant === 'Todas' ? 'Todas las áreas' : selectedPlant}</p>
+                                <p className="text-[11px] text-slate-400">{trendWeek.label} · {selectedPlant === 'Todas' ? 'Todas las áreas' : selectedPlant}{shiftFilterTxt && <span data-shift-badge className="ml-2 inline-flex items-center gap-1 bg-slate-800 text-white rounded-full px-2 py-0.5 text-[10px] font-bold">{shiftFilterTxt}<button onClick={() => setShiftTypeFilter('Todos')} className="text-slate-300 hover:text-white" title="Ver todos los turnos">×</button></span>}</p>
                             </div>
                             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-5">
                                 <StatCard title="Arranques fuera de tiempo" value={weekSummary.totals.arranques} icon={Icons.Clock} color="#0284c7" />
@@ -1238,7 +1196,7 @@
                                     <button onClick={resetWeekRange} className="bg-white border border-slate-200 hover:bg-slate-100 px-3 py-1.5 rounded text-xs text-slate-500 font-semibold">Semana actual</button>
                                 </div>
                             </div>
-                            <p className="text-[11px] text-slate-400 -mt-2.5 mb-3">{trendWeek.label} · {trendWeek.days.length} día(s)</p>
+                            <p className="text-[11px] text-slate-400 -mt-2.5 mb-3">{trendWeek.label} · {trendWeek.days.length} día(s){shiftFilterTxt && <span data-shift-badge className="ml-2 inline-flex items-center gap-1 bg-slate-800 text-white rounded-full px-2 py-0.5 text-[10px] font-bold">{shiftFilterTxt}<button onClick={() => setShiftTypeFilter('Todos')} className="text-slate-300 hover:text-white" title="Ver todos los turnos">×</button></span>}</p>
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
                                 <TotalTrendLine wide title="Arranques y llegadas fuera de tiempo" icon={Icons.Clock} metrics={[{ key: 'arranques', label: 'Arranques fuera de tiempo', color: '#0284c7' }, { key: 'llegadas', label: 'Llegadas fuera de tiempo', color: '#e11d48' }]} days={trendWeek.days} plants={plantsToShow} compact={trendWeek.days.length > 24} />
                                 <TotalTrendLine title="Percances" icon={Icons.Activity} metrics={[{ key: 'accidents', label: 'Percances', color: '#ea580c' }]} days={trendWeek.days} plants={plantsToShow} compact={trendWeek.days.length > 12} />
@@ -1260,7 +1218,7 @@
                                     <button onClick={resetMonthRange} className="bg-white border border-slate-200 hover:bg-slate-100 px-3 py-1.5 rounded text-xs text-slate-500 font-semibold">Mes actual</button>
                                 </div>
                             </div>
-                            <p className="text-[11px] text-slate-400 -mt-2.5 mb-3">{trendMonth.label} · {trendMonth.days.length} semana(s)</p>
+                            <p className="text-[11px] text-slate-400 -mt-2.5 mb-3">{trendMonth.label} · {trendMonth.days.length} semana(s){shiftFilterTxt && <span data-shift-badge className="ml-2 inline-flex items-center gap-1 bg-slate-800 text-white rounded-full px-2 py-0.5 text-[10px] font-bold">{shiftFilterTxt}<button onClick={() => setShiftTypeFilter('Todos')} className="text-slate-300 hover:text-white" title="Ver todos los turnos">×</button></span>}</p>
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
                                 <TotalTrendLine wide title="Arranques y llegadas fuera de tiempo" icon={Icons.Clock} metrics={[{ key: 'arranques', label: 'Arranques fuera de tiempo', color: '#0284c7' }, { key: 'llegadas', label: 'Llegadas fuera de tiempo', color: '#e11d48' }]} days={trendMonth.days} plants={plantsToShow} compact={trendMonth.days.length > 24} />
                                 <TotalTrendLine title="Percances" icon={Icons.Activity} metrics={[{ key: 'accidents', label: 'Percances', color: '#ea580c' }]} days={trendMonth.days} plants={plantsToShow} compact={trendMonth.days.length > 12} />
